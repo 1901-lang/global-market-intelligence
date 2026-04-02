@@ -22,8 +22,7 @@ import logging
 from datetime import datetime, date
 from typing import Any, Dict, List, Optional
 
-import aiosqlite
-from database import DB_PATH
+from db import get_db
 
 from agents.llm import llm_chat
 
@@ -46,7 +45,7 @@ Be rigorous, data-first, and translate numbers into clear business implications.
 
 async def _save_kpi_report(content: str, metrics: Dict):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 "INSERT INTO analytics_reports (content, metrics_json, date, timestamp) "
                 "VALUES (?, ?, ?, ?)",
@@ -59,12 +58,10 @@ async def _save_kpi_report(content: str, metrics: Dict):
 
 async def get_latest_kpi_report() -> Optional[Dict]:
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        async with get_db() as db:
+            row = await db.fetchone(
                 "SELECT * FROM analytics_reports ORDER BY timestamp DESC LIMIT 1"
-            ) as cur:
-                row = await cur.fetchone()
+            )
         if not row:
             return None
         return {
@@ -82,12 +79,10 @@ async def get_latest_kpi_report() -> Optional[Dict]:
 async def get_recent_activities(limit: int = 50) -> List[Dict]:
     """Fetch recent activity log entries for all agents."""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        async with get_db() as db:
+            rows = await db.fetchall(
                 "SELECT * FROM agent_activities ORDER BY timestamp DESC LIMIT ?", (limit,)
-            ) as cur:
-                rows = await cur.fetchall()
+            )
         return [
             {
                 "id": r["id"],
@@ -106,7 +101,7 @@ async def get_recent_activities(limit: int = 50) -> List[Dict]:
 
 async def _save_activity(action_type: str, summary: str):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 "INSERT INTO agent_activities (agent_name, action_type, summary, timestamp) "
                 "VALUES (?, ?, ?, ?)",
@@ -120,21 +115,17 @@ async def _save_activity(action_type: str, summary: str):
 async def _fetch_signal_counts() -> Dict:
     """Count signal distribution from the last 24 hours of consensus results."""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        async with get_db() as db:
+            rows = await db.fetchall(
                 "SELECT final_signal, COUNT(*) as cnt FROM consensus_results "
                 "WHERE timestamp >= datetime('now', '-24 hours') GROUP BY final_signal"
-            ) as cur:
-                rows = await cur.fetchall()
-            async with db.execute(
+            )
+            alert_row = await db.fetchone(
                 "SELECT COUNT(*) as cnt FROM alerts WHERE timestamp >= datetime('now', '-24 hours')"
-            ) as cur:
-                alert_row = await cur.fetchone()
-            async with db.execute(
+            )
+            chat_row = await db.fetchone(
                 "SELECT COUNT(*) as cnt FROM support_chats WHERE timestamp >= datetime('now', '-24 hours')"
-            ) as cur:
-                chat_row = await cur.fetchone()
+            )
         signal_counts = {r["final_signal"]: r["cnt"] for r in rows}
         return {
             "signals_24h": signal_counts,

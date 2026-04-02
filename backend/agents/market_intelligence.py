@@ -21,8 +21,7 @@ import logging
 from datetime import datetime, date
 from typing import Any, Dict, List, Optional
 
-import aiosqlite
-from database import DB_PATH
+from db import get_db
 
 from agents.llm import llm_chat
 
@@ -45,7 +44,7 @@ Be rigorous, data-first, and concise.
 
 async def _save_narrative(report_type: str, content: str, assets_covered: List[str]):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 "INSERT INTO market_intel_reports (report_type, content, assets_covered, date, timestamp) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -64,12 +63,10 @@ async def _save_narrative(report_type: str, content: str, assets_covered: List[s
 
 async def get_latest_narrative() -> Optional[Dict]:
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        async with get_db() as db:
+            row = await db.fetchone(
                 "SELECT * FROM market_intel_reports ORDER BY timestamp DESC LIMIT 1"
-            ) as cur:
-                row = await cur.fetchone()
+            )
         if not row:
             return None
         return {
@@ -87,7 +84,7 @@ async def get_latest_narrative() -> Optional[Dict]:
 
 async def _save_activity(action_type: str, summary: str):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 "INSERT INTO agent_activities (agent_name, action_type, summary, timestamp) "
                 "VALUES (?, ?, ?, ?)",

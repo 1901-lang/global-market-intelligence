@@ -22,8 +22,7 @@ import logging
 from datetime import datetime, date
 from typing import Any, Dict, List, Optional
 
-import aiosqlite
-from database import DB_PATH
+from db import get_db
 
 from agents.llm import llm_chat
 
@@ -46,7 +45,7 @@ Tone: professional, energetic, data-backed. Always include a call-to-action.
 
 async def _save_content(content_type: str, title: str, content: str, asset_context: Any = None):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 "INSERT INTO marketing_content (content_type, title, content, asset_context, timestamp) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -59,12 +58,10 @@ async def _save_content(content_type: str, title: str, content: str, asset_conte
 
 async def get_recent_content(limit: int = 20) -> List[Dict]:
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        async with get_db() as db:
+            rows = await db.fetchall(
                 "SELECT * FROM marketing_content ORDER BY timestamp DESC LIMIT ?", (limit,)
-            ) as cur:
-                rows = await cur.fetchall()
+            )
         return [
             {
                 "id": r["id"],
@@ -83,7 +80,7 @@ async def get_recent_content(limit: int = 20) -> List[Dict]:
 
 async def _save_activity(agent_name: str, action_type: str, summary: str):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 "INSERT INTO agent_activities (agent_name, action_type, summary, timestamp) "
                 "VALUES (?, ?, ?, ?)",

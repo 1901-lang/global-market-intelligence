@@ -22,8 +22,7 @@ import logging
 from datetime import datetime, date
 from typing import Any, Dict, List, Optional
 
-import aiosqlite
-from database import DB_PATH
+from db import get_db
 
 from agents.llm import llm_chat
 
@@ -47,7 +46,7 @@ Always communicate with clarity, authority, and a bias toward action.
 
 async def _save_activity(agent_name: str, action_type: str, summary: str, details: Any = None):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 "INSERT INTO agent_activities (agent_name, action_type, summary, details, timestamp) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -60,7 +59,7 @@ async def _save_activity(agent_name: str, action_type: str, summary: str, detail
 
 async def save_briefing(content: str, agent_statuses: List[Dict]):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 "INSERT INTO orchestrator_briefings (content, agent_statuses, date, timestamp) "
                 "VALUES (?, ?, ?, ?)",
@@ -73,12 +72,10 @@ async def save_briefing(content: str, agent_statuses: List[Dict]):
 
 async def get_latest_briefing() -> Optional[Dict]:
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        async with get_db() as db:
+            row = await db.fetchone(
                 "SELECT * FROM orchestrator_briefings ORDER BY timestamp DESC LIMIT 1"
-            ) as cur:
-                row = await cur.fetchone()
+            )
         if not row:
             return None
         return {

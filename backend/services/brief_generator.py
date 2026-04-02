@@ -3,8 +3,7 @@ import json
 import logging
 from datetime import datetime, date
 from typing import List, Dict, Any, Optional
-import aiosqlite
-from database import DB_PATH
+from db import get_db
 from models.schemas import Brief, ConsensusResult, AssetPrice, MarketContext
 
 logger = logging.getLogger(__name__)
@@ -118,7 +117,7 @@ async def generate_brief(
 
 async def _save_brief(brief: Brief):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 """
                 INSERT INTO briefs (content, key_signals, risks, date, timestamp)
@@ -139,12 +138,10 @@ async def _save_brief(brief: Brief):
 
 async def get_latest_brief() -> Optional[Brief]:
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        async with get_db() as db:
+            row = await db.fetchone(
                 "SELECT * FROM briefs ORDER BY timestamp DESC LIMIT 1"
-            ) as cursor:
-                row = await cursor.fetchone()
+            )
         if not row:
             return None
         return Brief(

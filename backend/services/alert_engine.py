@@ -2,8 +2,7 @@ import json
 import logging
 from datetime import datetime
 from typing import List, Optional
-import aiosqlite
-from database import DB_PATH
+from db import get_db
 from models.schemas import Alert, ConsensusResult
 
 logger = logging.getLogger(__name__)
@@ -14,7 +13,7 @@ _previous_signals: dict = {}
 
 async def _save_alert(alert: Alert):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 """
                 INSERT INTO alerts (asset, alert_type, message, signal, confidence, severity, is_read, timestamp)
@@ -73,13 +72,11 @@ async def process_consensus_for_alerts(consensus: ConsensusResult):
 
 async def get_recent_alerts(limit: int = 50) -> List[Alert]:
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        async with get_db() as db:
+            rows = await db.fetchall(
                 "SELECT * FROM alerts ORDER BY timestamp DESC LIMIT ?",
                 (limit,),
-            ) as cursor:
-                rows = await cursor.fetchall()
+            )
         return [
             Alert(
                 id=r["id"],
@@ -101,7 +98,7 @@ async def get_recent_alerts(limit: int = 50) -> List[Alert]:
 
 async def mark_alert_read(alert_id: int):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 "UPDATE alerts SET is_read = 1 WHERE id = ?", (alert_id,)
             )

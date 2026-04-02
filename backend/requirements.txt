@@ -15,3 +15,22 @@ yfinance==0.2.37
 requests==2.31.0
 python-dateutil==2.8.2
 apscheduler==3.10.4
+
+# Security & Auth
+python-jose[cryptography]==3.4.0
+passlib[bcrypt]==1.7.4
+cryptography==46.0.5
+
+# Rate limiting
+slowapi==0.1.9
+
+# PostgreSQL async driver (used when DATABASE_URL is set)
+asyncpg==0.29.0
+
+# Error monitoring
+sentry-sdk[fastapi]==1.44.1
+
+# Tests
+pytest==8.0.2
+pytest-asyncio==0.23.5
+httpx==0.26.0

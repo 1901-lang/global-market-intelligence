@@ -2,8 +2,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional
-import aiosqlite
-from database import DB_PATH
+from db import get_db
 from models.schemas import ModelPerformance, ConsensusResult
 
 logger = logging.getLogger(__name__)
@@ -17,13 +16,11 @@ MAX_WEIGHT = 2.0
 async def get_model_weights(asset: str) -> Dict[str, float]:
     weights: Dict[str, float] = {}
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        async with get_db() as db:
+            rows = await db.fetchall(
                 "SELECT model_name, weight FROM model_performance WHERE asset = ?",
                 (asset,),
-            ) as cursor:
-                rows = await cursor.fetchall()
+            )
         for row in rows:
             weights[row["model_name"]] = row["weight"]
     except Exception as exc:
@@ -36,7 +33,7 @@ async def get_model_weights(asset: str) -> Dict[str, float]:
 
 async def record_prediction(asset: str, model_name: str):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 """
                 INSERT INTO model_performance (model_name, asset, total_predictions, correct_predictions, accuracy, weight, last_updated)
@@ -62,13 +59,11 @@ async def record_outcome(
     Adjusts weight based on accuracy.
     """
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        async with get_db() as db:
+            row = await db.fetchone(
                 "SELECT * FROM model_performance WHERE model_name = ? AND asset = ?",
                 (model_name, asset),
-            ) as cursor:
-                row = await cursor.fetchone()
+            )
 
             if row is None:
                 return
@@ -96,13 +91,11 @@ async def record_outcome(
 
 async def get_all_performance() -> List[Dict]:
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        async with get_db() as db:
+            rows = await db.fetchall(
                 "SELECT * FROM model_performance ORDER BY asset, model_name"
-            ) as cursor:
-                rows = await cursor.fetchall()
-        return [dict(r) for r in rows]
+            )
+        return list(rows)
     except Exception as exc:
         logger.warning(f"get_all_performance failed: {exc}")
         return []

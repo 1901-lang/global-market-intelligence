@@ -22,8 +22,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 
-import aiosqlite
-from database import DB_PATH
+from db import get_db
 
 from agents.llm import llm_chat
 
@@ -54,9 +53,9 @@ for commodities and crypto. Create a friendly, personalised welcome guide.
 # Database helpers
 # ---------------------------------------------------------------------------
 
-async def _save_message(session_id: str, role: str, message: str):
+async def save_message(session_id: str, role: str, message: str):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 "INSERT INTO support_chats (session_id, role, message, timestamp) "
                 "VALUES (?, ?, ?, ?)",
@@ -64,28 +63,29 @@ async def _save_message(session_id: str, role: str, message: str):
             )
             await db.commit()
     except Exception as exc:
-        logger.warning("_save_message failed: %s", exc)
+        logger.warning("save_message failed: %s", exc)
+
+# Keep underscore alias for backwards compatibility within this module
+_save_message = save_message
 
 
 async def get_chat_history(session_id: str) -> List[Dict]:
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
+        async with get_db() as db:
+            rows = await db.fetchall(
                 "SELECT role, message, timestamp FROM support_chats "
                 "WHERE session_id = ? ORDER BY timestamp ASC",
                 (session_id,),
-            ) as cur:
-                rows = await cur.fetchall()
+            )
         return [{"role": r["role"], "message": r["message"], "timestamp": r["timestamp"]} for r in rows]
     except Exception as exc:
         logger.warning("get_chat_history failed: %s", exc)
         return []
 
 
-async def _save_activity(action_type: str, summary: str):
+async def save_activity(action_type: str, summary: str):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 "INSERT INTO agent_activities (agent_name, action_type, summary, timestamp) "
                 "VALUES (?, ?, ?, ?)",
@@ -93,7 +93,9 @@ async def _save_activity(action_type: str, summary: str):
             )
             await db.commit()
     except Exception as exc:
-        logger.warning("_save_activity failed: %s", exc)
+        logger.warning("save_activity failed: %s", exc)
+
+_save_activity = save_activity
 
 
 # ---------------------------------------------------------------------------

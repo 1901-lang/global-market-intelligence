@@ -3,10 +3,23 @@ import aiosqlite
 from datetime import datetime
 from typing import Optional
 
-DB_PATH = os.getenv("DB_PATH", "aip.db")
+from db import DB_PATH, IS_POSTGRES, get_db
+
+# DB_PATH re-exported so existing code that imports it from database still works
+__all__ = ["DB_PATH", "init_db"]
 
 
 CREATE_TABLES_SQL = """
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    email TEXT DEFAULT '',
+    hashed_password TEXT NOT NULL,
+    role TEXT DEFAULT 'analyst',
+    is_active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS assets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol TEXT NOT NULL,
@@ -157,14 +170,26 @@ CREATE TABLE IF NOT EXISTS analytics_reports (
 """
 
 
+def _make_pg_ddl(sqlite_ddl: str) -> str:
+    """Convert the SQLite DDL to PostgreSQL-compatible DDL."""
+    pg = sqlite_ddl
+    # AUTOINCREMENT not valid in PostgreSQL; use SERIAL instead
+    pg = pg.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+    return pg
+
+
 async def init_db():
-    async with aiosqlite.connect(DB_PATH) as db:
-        for statement in CREATE_TABLES_SQL.split(";"):
-            stmt = statement.strip()
-            if stmt:
-                await db.execute(stmt)
-        await db.commit()
-
-
-async def get_db():
-    return aiosqlite.connect(DB_PATH)
+    if IS_POSTGRES:
+        pg_ddl = _make_pg_ddl(CREATE_TABLES_SQL)
+        async with get_db() as db:
+            for statement in pg_ddl.split(";"):
+                stmt = statement.strip()
+                if stmt:
+                    await db.execute(stmt)
+    else:
+        async with aiosqlite.connect(DB_PATH) as db:
+            for statement in CREATE_TABLES_SQL.split(";"):
+                stmt = statement.strip()
+                if stmt:
+                    await db.execute(stmt)
+            await db.commit()
