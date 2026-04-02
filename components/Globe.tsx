@@ -104,7 +104,7 @@ function GlobeScene({ onMarkerHover }: { onMarkerHover: (data: MarketData | null
   const globeRef = useRef<THREE.Mesh>(null)
 
   useFrame(() => {
-    void globeRef
+    // OrbitControls handles rotation; ref retained for future effects
   })
 
   return (
