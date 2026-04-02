@@ -18,6 +18,13 @@ const REFRESH_DELAY_MS = 3000
 // allowing the AI generation to complete.
 const BRIEF_GENERATION_DELAY_MS = 5000
 
+/** Build fetch headers, attaching the JWT token when available. */
+function authHeaders(): HeadersInit {
+  if (typeof window === 'undefined') return {}
+  const token = localStorage.getItem('aip_token')
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 interface Asset {
   symbol: string
   name: string
@@ -117,6 +124,12 @@ function TopBar({ context, lastUpdated, onRefresh, refreshing }: {
               Updated {lastUpdated.toLocaleTimeString()}
             </span>
           )}
+          <a
+            href="/login"
+            className="px-3 py-1.5 text-xs rounded-lg border border-[#30363d] text-gray-400 hover:border-[#58a6ff] hover:text-[#58a6ff] transition-colors"
+          >
+            Sign in
+          </a>
           <button
             onClick={onRefresh}
             disabled={refreshing}
@@ -141,7 +154,7 @@ export default function Home() {
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/full`)
+      const res = await fetch(`${API_URL}/api/full`, { headers: authHeaders() })
       if (!res.ok) throw new Error(`API error ${res.status}`)
       const json = await res.json()
       setData(json)
@@ -157,7 +170,7 @@ export default function Home() {
 
   const fetchBrief = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/brief`)
+      const res = await fetch(`${API_URL}/api/brief`, { headers: authHeaders() })
       if (res.ok) {
         const json = await res.json()
         setBrief(json)
@@ -167,13 +180,19 @@ export default function Home() {
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
-    await fetch(`${API_URL}/api/refresh`, { method: 'POST' }).catch(() => {})
+    await fetch(`${API_URL}/api/refresh`, {
+      method: 'POST',
+      headers: authHeaders(),
+    }).catch(() => {})
     setTimeout(fetchData, REFRESH_DELAY_MS)
   }, [fetchData])
 
   const handleGenerateBrief = useCallback(async () => {
     setBriefLoading(true)
-    await fetch(`${API_URL}/api/brief/generate`, { method: 'POST' }).catch(() => {})
+    await fetch(`${API_URL}/api/brief/generate`, {
+      method: 'POST',
+      headers: authHeaders(),
+    }).catch(() => {})
     setTimeout(async () => {
       await fetchBrief()
       setBriefLoading(false)

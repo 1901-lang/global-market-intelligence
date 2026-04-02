@@ -677,8 +677,8 @@ async def support_chat_stream(request: Request, req: ChatRequest):
                 "unavailable (API key not configured)."
             )
             yield f"data: {json.dumps({'type': 'token', 'content': fallback})}\n\n"
-            await cs_agent._save_message(session_id, "user", msg)
-            await cs_agent._save_message(session_id, "assistant", fallback)
+            await cs_agent.save_message(session_id, "user", msg)
+            await cs_agent.save_message(session_id, "assistant", fallback)
             yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
             return
 
@@ -719,9 +719,9 @@ async def support_chat_stream(request: Request, req: ChatRequest):
                     full_reply += content
                     yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
 
-            await cs_agent._save_message(session_id, "user", msg)
-            await cs_agent._save_message(session_id, "assistant", full_reply)
-            await cs_agent._save_activity("chat_stream", f"session={session_id[:8]}")
+            await cs_agent.save_message(session_id, "user", msg)
+            await cs_agent.save_message(session_id, "assistant", full_reply)
+            await cs_agent.save_activity("chat_stream", f"session={session_id[:8]}")
             yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
         except Exception as exc:
             logger.warning("SSE chat error: %s", exc)

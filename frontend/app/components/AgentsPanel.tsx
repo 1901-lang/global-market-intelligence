@@ -71,18 +71,81 @@ function SupportChat({ apiUrl }: { apiUrl: string }) {
     setInput('')
     setLoading(true)
     setMessages(prev => [...prev, { role: 'user', message: msg }])
+
+    // Try SSE streaming endpoint first, fall back to regular POST
+    const streamUrl = `${apiUrl}/api/agents/support/chat/stream`
     try {
-      const res = await fetch(`${apiUrl}/api/agents/support/chat`, {
+      const res = await fetch(streamUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(typeof window !== 'undefined' && localStorage.getItem('aip_token')
+            ? { Authorization: `Bearer ${localStorage.getItem('aip_token')}` }
+            : {}),
+        },
         body: JSON.stringify({ session_id: sessionId, message: msg }),
       })
-      if (res.ok) {
-        const data = await res.json()
-        setSessionId(data.session_id)
-        setMessages(prev => [...prev, { role: 'assistant', message: data.reply }])
+
+      if (!res.ok || !res.body) throw new Error('stream unavailable')
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let assistantMsg = ''
+      let streamingIdx = -1
+
+      setMessages(prev => {
+        streamingIdx = prev.length
+        return [...prev, { role: 'assistant', message: '' }]
+      })
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const evt = JSON.parse(line.slice(6))
+            if (evt.type === 'session' && evt.session_id) {
+              setSessionId(evt.session_id)
+            } else if (evt.type === 'token' && evt.content) {
+              assistantMsg += evt.content
+              const captured = assistantMsg
+              setMessages(prev => {
+                const updated = [...prev]
+                if (streamingIdx >= 0 && updated[streamingIdx]) {
+                  updated[streamingIdx] = { role: 'assistant', message: captured }
+                }
+                return updated
+              })
+            }
+          } catch {}
+        }
       }
-    } catch {}
+    } catch {
+      // Fallback to regular POST
+      try {
+        const res = await fetch(`${apiUrl}/api/agents/support/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(typeof window !== 'undefined' && localStorage.getItem('aip_token')
+              ? { Authorization: `Bearer ${localStorage.getItem('aip_token')}` }
+              : {}),
+          },
+          body: JSON.stringify({ session_id: sessionId, message: msg }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setSessionId(data.session_id)
+          setMessages(prev => [...prev, { role: 'assistant', message: data.reply }])
+        }
+      } catch {}
+    }
     setLoading(false)
   }, [input, loading, sessionId, apiUrl])
 

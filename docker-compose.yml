@@ -1,0 +1,77 @@
+version: "3.9"
+
+# ── Local development stack ───────────────────────────────────────────────────
+# Start everything:   docker compose up
+# Rebuild backend:    docker compose up --build backend
+# Run tests only:     docker compose run --rm backend pytest
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aip
+      POSTGRES_PASSWORD: aip_dev_password
+      POSTGRES_DB: aip
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aip"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── FastAPI backend ─────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      # Database
+      DATABASE_URL: postgresql://aip:aip_dev_password@db:5432/aip
+      # Auth — generate a real secret for production!
+      SECRET_KEY: dev_secret_change_in_production
+      REQUIRE_AUTH: "false"
+      # AI APIs — add your real keys here or in a .env file
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      NEWS_API_KEY: ${NEWS_API_KEY:-}
+      # Encryption (optional — generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      # CORS — update this to your frontend URL in production
+      ALLOWED_ORIGINS: "http://localhost:3000"
+      # Sentry (optional)
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    volumes:
+      # Mount source for hot-reload during development
+      - ./backend:/app
+
+  # ── Next.js frontend (development) ─────────────────────────────────────────
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    restart: unless-stopped
+    command: sh -c "npm install && npm run dev"
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:8000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  postgres_data:
