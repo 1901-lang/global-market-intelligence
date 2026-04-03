@@ -167,6 +167,61 @@ CREATE TABLE IF NOT EXISTS analytics_reports (
     date TEXT,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ── Research Analyst tables ──────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS research_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset TEXT NOT NULL,
+    note_type TEXT NOT NULL,
+    time_horizon TEXT,
+    market_regime TEXT,
+    thesis TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0.5,
+    key_drivers TEXT,
+    confirming_evidence TEXT,
+    contradictory_evidence TEXT,
+    key_risks TEXT,
+    catalysts TEXT,
+    invalidation_conditions TEXT,
+    scenario_analysis TEXT,
+    summary TEXT NOT NULL,
+    payload TEXT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS thesis_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset TEXT NOT NULL,
+    prior_thesis TEXT,
+    new_thesis TEXT NOT NULL,
+    change_summary TEXT,
+    drivers_of_change TEXT,
+    confidence_delta REAL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS catalyst_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    asset_scope TEXT,
+    event_time TIMESTAMP,
+    importance TEXT NOT NULL DEFAULT 'medium',
+    expected_impact TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    notes TEXT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS market_regimes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    contributing_factors TEXT,
+    confidence REAL NOT NULL DEFAULT 0.7,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 

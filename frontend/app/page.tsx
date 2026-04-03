@@ -8,6 +8,7 @@ import ConsensusView from './components/ConsensusView'
 import BriefPanel from './components/BriefPanel'
 import SignalBadge from './components/SignalBadge'
 import AgentsPanel from './components/AgentsPanel'
+import ResearchPanel from './components/ResearchPanel'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -290,6 +291,9 @@ export default function Home() {
 
             {/* Model Performance */}
             <ModelPerformancePanel apiUrl={API_URL} />
+
+            {/* Research Analyst */}
+            <ResearchPanel apiUrl={API_URL} />
 
             {/* AI Agent Team */}
             <AgentsPanel apiUrl={API_URL} />

@@ -43,18 +43,25 @@ from models.schemas import (
     Alert,
     AnalyticsReport,
     Brief,
+    CatalystEvent,
     ChatRequest,
     ConsensusResult,
     DeepDiveRequest,
     FullMarketData,
+    GenerateResearchRequest,
     LeadInsightRequest,
     MarketContext,
     MarketIntelReport,
+    MarketRegime,
     MarketingContentItem,
     ModelOutput,
     ModelPerformance,
     OnboardRequest,
     OrchestratorBriefing,
+    ResearchAgentStatus,
+    ResearchNote,
+    ThesisChange,
+    ThesisChangeRequest,
 )
 from security import sanitize_input
 from services.data_service import fetch_all_assets, fetch_macro_context
@@ -78,6 +85,7 @@ import agents.marketing as mkt_agent
 import agents.market_intelligence as intel_agent
 import agents.customer_success as cs_agent
 import agents.analytics as analytics_agent
+import agents.research as research_agent
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -256,6 +264,18 @@ def _make_agent_scheduler() -> AsyncIOScheduler:
     sched.add_job(
         analytics_agent.run_anomaly_check,
         "interval", hours=4, id="analytics_anomaly",
+        args=[_state],
+    )
+
+    # Research Analyst – pre-market 07:30, EOD wrap 17:00
+    sched.add_job(
+        research_agent.run_premarket_note,
+        "cron", hour=7, minute=30, id="research_premarket",
+        args=[_state],
+    )
+    sched.add_job(
+        research_agent.run_eod_wrap,
+        "cron", hour=17, minute=0, id="research_eod_wrap",
         args=[_state],
     )
 
@@ -777,3 +797,93 @@ async def anomaly_check(
     """Run anomaly detection on a custom metrics dictionary."""
     result = await analytics_agent.check_anomalies_from_metrics(req.metrics)
     return {"analysis": result}
+
+
+# ── Agent 6: Market Research Analyst ─────────────────────────────────────────
+
+@app.get("/api/agents/research/status")
+async def get_research_agent_status():
+    """Return research analyst agent status."""
+    return await research_agent.get_agent_status()
+
+
+@app.get("/api/agents/research/latest")
+async def get_latest_research_note(asset: Optional[str] = None):
+    """Return the latest research note (platform-wide or asset-specific)."""
+    return await research_agent.get_latest_note(asset)
+
+
+@app.get("/api/agents/research/notes")
+async def get_research_notes(limit: int = 20, asset: Optional[str] = None):
+    """Return paginated research note history."""
+    return await research_agent.get_notes(limit, asset)
+
+
+@app.post("/api/agents/research/generate")
+@limiter.limit("5/minute")
+async def generate_research_note(
+    request: Request,
+    req: GenerateResearchRequest,
+    background_tasks: BackgroundTasks,
+    _: User = Depends(require_auth),
+):
+    """Trigger on-demand research note generation."""
+    background_tasks.add_task(research_agent.generate_daily_note, _state)
+    return {"status": "generating", "note_type": req.note_type}
+
+
+@app.post("/api/agents/research/deep-dive")
+@limiter.limit("10/minute")
+async def research_deep_dive(
+    request: Request,
+    req: DeepDiveRequest,
+    _: User = Depends(require_auth),
+):
+    """Generate an asset-specific deep research note."""
+    note = await research_agent.generate_deep_research(req.symbol, _state)
+    return note.model_dump(mode="json")
+
+
+@app.post("/api/agents/research/thesis-change")
+@limiter.limit("10/minute")
+async def research_thesis_change(
+    request: Request,
+    req: ThesisChangeRequest,
+    _: User = Depends(require_auth),
+):
+    """Compare prior vs current thesis for an asset."""
+    try:
+        symbol = sanitize_input(req.symbol)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Input contains disallowed content")
+    change = await research_agent.generate_thesis_change(symbol, _state)
+    return change.model_dump(mode="json")
+
+
+@app.get("/api/agents/research/catalysts")
+async def get_research_catalysts(limit: int = 20, status: Optional[str] = None):
+    """Return recent catalyst events."""
+    return await research_agent.get_catalysts(limit, status)
+
+
+@app.post("/api/agents/research/catalysts/generate")
+@limiter.limit("5/minute")
+async def generate_catalysts(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    _: User = Depends(require_auth),
+):
+    """Trigger on-demand catalyst memo generation."""
+    background_tasks.add_task(research_agent.generate_catalyst_memo, _state)
+    return {"status": "generating"}
+
+
+@app.get("/api/agents/research/regime")
+async def get_market_regime():
+    """Return the latest market regime classification."""
+    saved = await research_agent.get_latest_regime()
+    if saved:
+        return saved
+    from services.regime_classifier import classify_regime
+    regime = classify_regime(_state.get("context"))
+    return regime.model_dump(mode="json")

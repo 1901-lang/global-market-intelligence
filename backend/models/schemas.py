@@ -203,3 +203,93 @@ class AnomalyCheckRequest(BaseModel):
 class DeepDiveRequest(BaseModel):
     symbol: str
 
+
+class ScenarioCase(BaseModel):
+    label: str  # "bull", "base", "bear"
+    probability: Optional[float] = None
+    thesis: str
+    price_target: Optional[str] = None
+    catalysts: List[str] = []
+    risks: List[str] = []
+
+
+class ResearchNote(BaseModel):
+    id: Optional[int] = None
+    asset: str  # "PLATFORM" for platform-wide, or e.g. "BTC"
+    note_type: str  # daily_note, intraday_update, deep_research, thesis_change, catalyst_watch
+    time_horizon: Optional[str] = None  # "intraday", "1-3d", "1w", "1m"
+    market_regime: Optional[str] = None
+    thesis: str
+    confidence: float = Field(ge=0.0, le=1.0, default=0.5)
+    key_drivers: List[str] = []
+    confirming_evidence: List[str] = []
+    contradictory_evidence: List[str] = []
+    key_risks: List[str] = []
+    catalysts: List[str] = []
+    invalidation_conditions: List[str] = []
+    scenario_analysis: List[ScenarioCase] = []
+    summary: str
+    timestamp: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ThesisChange(BaseModel):
+    id: Optional[int] = None
+    asset: str
+    prior_thesis: str
+    new_thesis: str
+    change_summary: str
+    drivers_of_change: List[str] = []
+    confidence_delta: Optional[float] = None
+    timestamp: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class MarketRegime(BaseModel):
+    id: Optional[int] = None
+    label: str  # risk_on, risk_off, inflationary, disinflationary, dollar_strength, dollar_weakness, volatility_stress, liquidity_supportive, mixed_transition
+    rationale: str
+    contributing_factors: List[str] = []
+    confidence: float = Field(ge=0.0, le=1.0, default=0.7)
+    timestamp: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CatalystEvent(BaseModel):
+    id: Optional[int] = None
+    title: str
+    event_type: str  # economic_data, central_bank, earnings, geopolitical, technical, other
+    asset_scope: List[str] = []
+    event_time: Optional[datetime] = None
+    importance: str = "medium"  # high, medium, low
+    expected_impact: Optional[str] = None
+    status: str = "pending"  # pending, active, passed
+    notes: Optional[str] = None
+    timestamp: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ResearchAgentStatus(BaseModel):
+    agent: str = "research_analyst"
+    status: str  # active, idle, error
+    last_run: Optional[str] = None
+    latest_note_type: Optional[str] = None
+    latest_note_asset: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class GenerateResearchRequest(BaseModel):
+    note_type: Optional[str] = "daily_note"  # daily_note, intraday_update, catalyst_watch
+
+
+class ThesisChangeRequest(BaseModel):
+    symbol: str
+

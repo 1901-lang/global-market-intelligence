@@ -131,6 +131,12 @@ async def _collect_agent_statuses(state: Dict) -> List[Dict]:
             "last_run": datetime.utcnow().isoformat(),
             "notes": "KPI reporting active",
         },
+        {
+            "agent": "research_analyst",
+            "status": "active",
+            "last_run": datetime.utcnow().isoformat(),
+            "notes": "Generating structured research artifacts for institutional users",
+        },
     ]
     return statuses
 
