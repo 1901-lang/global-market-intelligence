@@ -155,8 +155,88 @@ The agent panel is embedded directly in the dashboard UI under the Model Perform
 
 ## 🚀 Deployment
 
+### Hostinger VPS — auren-workspace.com
+
+The production stack runs on a Hostinger VPS with Docker Compose, nginx reverse proxy, and Let's Encrypt TLS. Services are mapped as follows:
+
+| URL | Service |
+|-----|---------|
+| `https://auren-workspace.com` | Next.js frontend |
+| `https://www.auren-workspace.com` | → redirect to apex |
+| `https://api.auren-workspace.com` | FastAPI backend |
+
+#### DNS records (configure in Hostinger DNS panel)
+
+| Type | Name | Value |
+|------|------|-------|
+| A | `@` | `<your-vps-ip>` |
+| A | `www` | `<your-vps-ip>` |
+| A | `api` | `<your-vps-ip>` |
+
+#### Step-by-step deployment
+
+**1. SSH into the VPS and install Docker**
+```bash
+apt-get update && apt-get install -y docker.io docker-compose-plugin
+```
+
+**2. Clone the repository**
+```bash
+git clone https://github.com/1901-lang/global-market-intelligence.git
+cd global-market-intelligence
+```
+
+**3. Create the production environment file**
+```bash
+cp .env.example .env
+```
+Edit `.env` and fill in all required secrets, then set:
+```ini
+ALLOWED_ORIGINS=https://auren-workspace.com,https://www.auren-workspace.com
+NEXT_PUBLIC_API_URL=https://api.auren-workspace.com
+SMTP_FROM=alerts@auren-workspace.com
+```
+
+**4. Issue TLS certificates (once)**
+
+Start a temporary HTTP-only nginx so Certbot can complete the ACME challenge:
+```bash
+# Bring up everything except nginx first
+docker compose -f docker-compose.prod.yml up -d db backend frontend certbot
+
+# Run certbot to obtain the certificates
+docker compose -f docker-compose.prod.yml run --rm certbot certonly \
+  --webroot -w /var/www/certbot \
+  -d auren-workspace.com -d www.auren-workspace.com -d api.auren-workspace.com \
+  --email admin@auren-workspace.com --agree-tos --no-eff-email
+```
+
+**5. Start the full stack (including nginx)**
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Verify all containers are healthy:
+```bash
+docker compose -f docker-compose.prod.yml ps
+```
+
+**6. Certificate renewal**
+
+Certbot runs inside its container and renews certificates automatically every 12 hours. Nginx picks up renewed certificates on the next reload.
+
+To force an immediate renewal check:
+```bash
+docker compose -f docker-compose.prod.yml exec certbot certbot renew --quiet
+docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
+```
+
+---
+
+### Other hosting options
+
 - **Frontend** → Vercel (`npm run build` → deploy). Set `NEXT_PUBLIC_API_URL` as an
-  environment variable pointing to your deployed backend URL.
+  environment variable pointing to `https://api.auren-workspace.com`.
 - **Backend** → Railway / Render (`uvicorn main:app --host 0.0.0.0 --port 8000`).
   The backend must run as a **persistent process** — APScheduler requires a long-lived
   instance and will not work correctly on serverless platforms (e.g. AWS Lambda, Vercel
