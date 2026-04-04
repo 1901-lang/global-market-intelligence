@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import Depends, HTTPException, status
@@ -94,14 +94,14 @@ def hash_password(plain: str) -> str:
 
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire, "type": "access"})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
 def create_refresh_token(data: dict) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode.update({"exp": expire, "type": "refresh"})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -138,7 +138,7 @@ async def create_user(user: UserCreate) -> Optional[dict]:
             await db.execute(
                 "INSERT INTO users (username, email, hashed_password, role, is_active, created_at) "
                 "VALUES (?, ?, ?, ?, 1, ?)",
-                (user.username, user.email or "", hashed, user.role, datetime.utcnow()),
+                (user.username, user.email or "", hashed, user.role, datetime.now(timezone.utc)),
             )
             await db.commit()
     except Exception as exc:

@@ -4,11 +4,11 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import AsyncGenerator, List, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import Depends, FastAPI, HTTPException, BackgroundTasks, Request, status
+from fastapi import Depends, FastAPI, HTTPException, BackgroundTasks, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -167,7 +167,7 @@ async def run_update_cycle():
         _state["signals"] = base_signals
         _state["consensus"] = all_consensus
         _state["model_outputs"] = all_model_outputs
-        _state["last_updated"] = datetime.utcnow()
+        _state["last_updated"] = datetime.now(timezone.utc)
 
         # Evaluate predictions made ~1 hour ago against current prices
         current_prices = {a.symbol: a.price for a in assets}
@@ -184,7 +184,7 @@ async def _persist_assets(assets: List[AssetPrice]):
             await db.execute(
                 """INSERT INTO price_data (symbol, price, change_1h, change_24h, volume_24h, market_cap, timestamp)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (a.symbol, a.price, a.change_1h, a.change_24h, a.volume_24h, a.market_cap, datetime.utcnow()),
+                (a.symbol, a.price, a.change_1h, a.change_24h, a.volume_24h, a.market_cap, datetime.now(timezone.utc)),
             )
         await db.commit()
 
@@ -194,7 +194,7 @@ async def _persist_context(ctx: MarketContext):
         await db.execute(
             """INSERT INTO market_context (usd_index, bond_yield_10y, vix, news_sentiment, on_chain_activity, timestamp)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (ctx.usd_index, ctx.bond_yield_10y, ctx.vix, ctx.news_sentiment, ctx.on_chain_activity, datetime.utcnow()),
+            (ctx.usd_index, ctx.bond_yield_10y, ctx.vix, ctx.news_sentiment, ctx.on_chain_activity, datetime.now(timezone.utc)),
         )
         await db.commit()
 
@@ -206,7 +206,7 @@ async def _persist_consensus(c: ConsensusResult):
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 c.asset, c.final_signal, c.confidence, c.agreement_level,
-                json.dumps(c.models), json.dumps(c.dissenting_models), datetime.utcnow(),
+                json.dumps(c.models), json.dumps(c.dissenting_models), datetime.now(timezone.utc),
             ),
         )
         await db.commit()
@@ -218,7 +218,7 @@ async def _persist_model_outputs(outputs: List[ModelOutput]):
             await db.execute(
                 """INSERT INTO model_outputs (asset, model_name, signal, confidence, reasoning, raw_response, timestamp)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (o.asset, o.model_name, o.signal, o.confidence, json.dumps(o.reasoning), o.raw_response, datetime.utcnow()),
+                (o.asset, o.model_name, o.signal, o.confidence, json.dumps(o.reasoning), o.raw_response, datetime.now(timezone.utc)),
             )
         await db.commit()
 
@@ -334,9 +334,28 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
+
+
+# ── Security headers middleware ────────────────────────────────────────────────
+# Applied to every response to protect against common web vulnerabilities.
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next) -> Response:
+    response = await call_next(request)
+    # Prevent browsers from MIME-sniffing the content-type
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    # Block clickjacking by disallowing framing
+    response.headers["X-Frame-Options"] = "DENY"
+    # Stop browsers from sending the Referer header to third-party sites
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Restrict browser features
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    # HSTS — uncomment and set the domain in production behind HTTPS
+    # response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    return response
 
 
 # ── Health check ───────────────────────────────────────────────────────────────
@@ -360,7 +379,7 @@ async def health():
     overall = "ok" if db_ok else "degraded"
     return {
         "status": overall,
-        "timestamp": datetime.utcnow(),
+        "timestamp": datetime.now(timezone.utc),
         "db": "ok" if db_ok else "error",
         "api_keys": keys,
         "auth_required": REQUIRE_AUTH,
@@ -536,6 +555,9 @@ async def get_correlation(symbols: str = "BTC,ETH,GOLD,OIL", limit: int = 60):
         std = sum((v - mean) ** 2 for v in vals) ** 0.5
         return mean, std
 
+    # Symbols that actually have price data
+    available = [s for s in syms if s in prices]
+
     # Pre-compute mean and std-dev once per symbol
     stats: dict[str, tuple[float, float]] = {}
     for sym in available:
@@ -558,7 +580,6 @@ async def get_correlation(symbols: str = "BTC,ETH,GOLD,OIL", limit: int = 60):
         return round(cov / (std_x * std_y), 4)
 
     matrix: dict[str, dict[str, float | None]] = {}
-    available = [s for s in syms if s in prices]
     for a in available:
         matrix[a] = {}
         for b in available:
@@ -1022,7 +1043,7 @@ async def update_preferences(
                     1 if body.notify_email else 0,
                     body.email_address or "",
                     1 if body.notifications_enabled else 0,
-                    datetime.utcnow(),
+                    datetime.now(timezone.utc),
                 ),
             )
             await db.commit()

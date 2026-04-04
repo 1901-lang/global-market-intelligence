@@ -240,8 +240,8 @@ function AgentQueryPanel({
       } else {
         setResult(`Error ${res.status}`)
       }
-    } catch (e: any) {
-      setResult(`Error: ${e.message}`)
+    } catch (e: unknown) {
+      setResult(`Error: ${e instanceof Error ? e.message : 'Unknown error'}`)
     }
     setLoading(false)
   }, [apiUrl, endpoint, method, fieldName, input])

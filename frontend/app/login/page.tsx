@@ -1,13 +1,21 @@
 'use client'
 
-import { useState, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useCallback, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [mode, setMode] = useState<'login' | 'register'>('login')
+
+  // Honour ?mode=register from landing page CTAs
+  useEffect(() => {
+    if (searchParams.get('mode') === 'register') {
+      setMode('register')
+    }
+  }, [searchParams])
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [email, setEmail] = useState('')
@@ -170,5 +178,17 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#0d1117] flex items-center justify-center">
+        <div className="animate-spin w-6 h-6 border-2 border-[#58a6ff] border-t-transparent rounded-full" />
+      </div>
+    }>
+      <LoginForm />
+    </Suspense>
   )
 }
