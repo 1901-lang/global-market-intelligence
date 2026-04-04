@@ -1,0 +1,96 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: SSH deploy → srv1557035.hstgr.cloud
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            # ── 1. Bootstrap (first run only) ────────────────────────────────
+            if [ ! -d /opt/aip ]; then
+              apt-get update -qq
+              apt-get install -y -qq curl git
+
+              # Install Docker if missing
+              if ! command -v docker &>/dev/null; then
+                curl -fsSL https://get.docker.com | sh
+              fi
+
+              # Install docker compose plugin if missing
+              if ! docker compose version &>/dev/null 2>&1; then
+                apt-get install -y -qq docker-compose-plugin
+              fi
+
+              git clone https://github.com/1901-lang/global-market-intelligence.git /opt/aip
+            fi
+
+            # ── 2. Pull latest code ───────────────────────────────────────────
+            cd /opt/aip
+            git fetch --all
+            git reset --hard origin/main
+
+            # ── 3. Write .env from GitHub Actions secrets ─────────────────────
+            cat > /opt/aip/.env <<'ENVEOF'
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            NEWS_API_KEY=${{ secrets.NEWS_API_KEY }}
+            SECRET_KEY=${{ secrets.SECRET_KEY }}
+            ENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}
+            POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS }}
+            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+            REQUIRE_AUTH=true
+            ACCESS_TOKEN_EXPIRE_MINUTES=30
+            REFRESH_TOKEN_EXPIRE_DAYS=7
+            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
+            ALERT_EMAIL_TO=${{ secrets.ALERT_EMAIL_TO }}
+            SMTP_HOST=${{ secrets.SMTP_HOST }}
+            SMTP_PORT=${{ secrets.SMTP_PORT }}
+            SMTP_USER=${{ secrets.SMTP_USER }}
+            SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
+            SMTP_FROM=${{ secrets.SMTP_FROM }}
+            ALERT_WEBHOOK_URL=${{ secrets.ALERT_WEBHOOK_URL }}
+            ALERT_MIN_SEVERITY=warning
+            ENVEOF
+
+            # Strip leading whitespace from heredoc indentation
+            sed -i 's/^[[:space:]]*//' /opt/aip/.env
+            chmod 600 /opt/aip/.env
+
+            # ── 4. Build and start the stack ──────────────────────────────────
+            docker compose -f /opt/aip/docker-compose.prod.yml pull --quiet || true
+            docker compose -f /opt/aip/docker-compose.prod.yml up -d --build --remove-orphans
+
+            # ── 5. Health check ───────────────────────────────────────────────
+            echo "Waiting for backend to be healthy..."
+            for i in $(seq 1 24); do
+              if docker compose -f /opt/aip/docker-compose.prod.yml exec -T backend \
+                   curl -sf http://localhost:8000/health &>/dev/null; then
+                echo "✅ Backend is healthy"
+                break
+              fi
+              [ "$i" -eq 24 ] && echo "⚠️  Backend health check timed out" && exit 1
+              sleep 5
+            done
+
+            echo "🚀 Deploy complete"
