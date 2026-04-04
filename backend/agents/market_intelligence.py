@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Any, Dict, List, Optional
 
 from db import get_db
@@ -59,7 +59,7 @@ async def _save_narrative(report_type: str, content: str, assets_covered: List[s
                     content,
                     json.dumps(assets_covered),
                     date.today().isoformat(),
-                    datetime.utcnow(),
+                    datetime.now(timezone.utc),
                 ),
             )
             await db.commit()
@@ -94,7 +94,7 @@ async def _save_activity(action_type: str, summary: str):
             await db.execute(
                 "INSERT INTO agent_activities (agent_name, action_type, summary, timestamp) "
                 "VALUES (?, ?, ?, ?)",
-                ("market_intelligence", action_type, summary, datetime.utcnow()),
+                ("market_intelligence", action_type, summary, datetime.now(timezone.utc)),
             )
             await db.commit()
     except Exception as exc:

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Any, Dict, List, Optional
 
 from db import get_db
@@ -56,7 +56,7 @@ async def _save_activity(agent_name: str, action_type: str, summary: str, detail
             await db.execute(
                 "INSERT INTO agent_activities (agent_name, action_type, summary, details, timestamp) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (agent_name, action_type, summary, json.dumps(details) if details else None, datetime.utcnow()),
+                (agent_name, action_type, summary, json.dumps(details) if details else None, datetime.now(timezone.utc)),
             )
             await db.commit()
     except Exception as exc:
@@ -69,7 +69,7 @@ async def save_briefing(content: str, agent_statuses: List[Dict]):
             await db.execute(
                 "INSERT INTO orchestrator_briefings (content, agent_statuses, date, timestamp) "
                 "VALUES (?, ?, ?, ?)",
-                (content, json.dumps(agent_statuses), date.today().isoformat(), datetime.utcnow()),
+                (content, json.dumps(agent_statuses), date.today().isoformat(), datetime.now(timezone.utc)),
             )
             await db.commit()
     except Exception as exc:
@@ -110,13 +110,13 @@ async def _collect_agent_statuses(state: Dict) -> List[Dict]:
         {
             "agent": "orchestrator",
             "status": "active",
-            "last_run": datetime.utcnow().isoformat(),
+            "last_run": datetime.now(timezone.utc).isoformat(),
             "notes": "Overseeing all agents",
         },
         {
             "agent": "marketing",
             "status": "active",
-            "last_run": datetime.utcnow().isoformat(),
+            "last_run": datetime.now(timezone.utc).isoformat(),
             "notes": "Generating content and lead insights",
         },
         {
@@ -128,13 +128,13 @@ async def _collect_agent_statuses(state: Dict) -> List[Dict]:
         {
             "agent": "customer_success",
             "status": "active",
-            "last_run": datetime.utcnow().isoformat(),
+            "last_run": datetime.now(timezone.utc).isoformat(),
             "notes": "User support chat available",
         },
         {
             "agent": "analytics",
             "status": "active",
-            "last_run": datetime.utcnow().isoformat(),
+            "last_run": datetime.now(timezone.utc).isoformat(),
             "notes": "KPI reporting active",
         },
     ]

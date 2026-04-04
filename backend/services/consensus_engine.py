@@ -1,6 +1,6 @@
 from typing import List, Dict
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from models.schemas import ModelOutput, ConsensusResult
 
 
@@ -17,7 +17,7 @@ def compute_consensus(
             agreement_level="low",
             models={},
             dissenting_models=[],
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
 
     weights = model_weights or {}
@@ -71,5 +71,5 @@ def compute_consensus(
         agreement_level=agreement_level,
         models=models_detail,
         dissenting_models=dissenting,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
     )

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Any, Dict, List, Optional
 
 from db import get_db
@@ -54,7 +54,7 @@ async def _save_content(content_type: str, title: str, content: str, asset_conte
             await db.execute(
                 "INSERT INTO marketing_content (content_type, title, content, asset_context, timestamp) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (content_type, title, content, json.dumps(asset_context) if asset_context else None, datetime.utcnow()),
+                (content_type, title, content, json.dumps(asset_context) if asset_context else None, datetime.now(timezone.utc)),
             )
             await db.commit()
     except Exception as exc:
@@ -89,7 +89,7 @@ async def _save_activity(agent_name: str, action_type: str, summary: str):
             await db.execute(
                 "INSERT INTO agent_activities (agent_name, action_type, summary, timestamp) "
                 "VALUES (?, ?, ?, ?)",
-                (agent_name, action_type, summary, datetime.utcnow()),
+                (agent_name, action_type, summary, datetime.now(timezone.utc)),
             )
             await db.commit()
     except Exception as exc:

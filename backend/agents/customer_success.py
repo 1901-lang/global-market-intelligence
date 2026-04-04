@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from db import get_db
@@ -67,7 +67,7 @@ async def save_message(session_id: str, role: str, message: str):
             await db.execute(
                 "INSERT INTO support_chats (session_id, role, message, timestamp) "
                 "VALUES (?, ?, ?, ?)",
-                (session_id, role, message, datetime.utcnow()),
+                (session_id, role, message, datetime.now(timezone.utc)),
             )
             await db.commit()
     except Exception as exc:
@@ -97,7 +97,7 @@ async def save_activity(action_type: str, summary: str):
             await db.execute(
                 "INSERT INTO agent_activities (agent_name, action_type, summary, timestamp) "
                 "VALUES (?, ?, ?, ?)",
-                ("customer_success", action_type, summary, datetime.utcnow()),
+                ("customer_success", action_type, summary, datetime.now(timezone.utc)),
             )
             await db.commit()
     except Exception as exc:
@@ -185,7 +185,7 @@ async def run_daily_check(state: Dict):
     """Collect platform engagement metrics and log a daily analytics snapshot."""
     from datetime import timedelta
     assets = state.get("assets", [])
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     today = now.date().isoformat()
     seven_days_ago = now - timedelta(days=7)
 

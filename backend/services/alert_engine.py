@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import smtplib
-from datetime import datetime
+from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import List, Optional
@@ -50,9 +50,8 @@ def _build_email_body(alert: Alert) -> str:
     )
 
 
-def _send_email_sync(alert: Alert):
+def _send_email_sync(alert: Alert, recipients: List[str]):
     """Synchronous SMTP send — run in a thread executor."""
-    recipients = [r.strip() for r in _ALERT_EMAIL_TO.split(",") if r.strip()]
     if not recipients:
         return
     try:
@@ -75,11 +74,52 @@ def _send_email_sync(alert: Alert):
         logger.warning("Alert email failed: %s", exc)
 
 
+async def _get_subscribed_user_emails(asset: str) -> List[str]:
+    """Return email addresses of users who have opted in to alert notifications.
+
+    A user is included when all three conditions hold:
+    - ``notifications_enabled = 1``
+    - ``notify_email = 1``
+    - ``email_address`` is a non-empty string
+    - ``preferred_assets`` is either empty (watches everything) or contains *asset*
+    """
+    try:
+        async with get_db() as db:
+            rows = await db.fetchall(
+                "SELECT email_address, preferred_assets "
+                "FROM user_preferences "
+                "WHERE notifications_enabled = 1 AND notify_email = 1 "
+                "AND email_address IS NOT NULL AND email_address != ''"
+            )
+        emails: List[str] = []
+        for row in rows:
+            preferred = json.loads(row["preferred_assets"] or "[]")
+            # Empty watchlist → user watches all assets
+            if not preferred or asset in preferred:
+                emails.append(row["email_address"].strip())
+        return emails
+    except Exception as exc:
+        logger.warning("_get_subscribed_user_emails failed: %s", exc)
+        return []
+
+
 async def _send_email_notification(alert: Alert):
-    if not (_SMTP_HOST and _ALERT_EMAIL_TO):
+    if not _SMTP_HOST:
+        return
+    # Combine global admin recipients with opted-in per-user emails
+    global_recipients = [r.strip() for r in _ALERT_EMAIL_TO.split(",") if r.strip()]
+    user_recipients = await _get_subscribed_user_emails(alert.asset)
+    # Deduplicate while preserving order
+    seen: set = set()
+    recipients: List[str] = []
+    for addr in global_recipients + user_recipients:
+        if addr not in seen:
+            seen.add(addr)
+            recipients.append(addr)
+    if not recipients:
         return
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _send_email_sync, alert)
+    await loop.run_in_executor(None, _send_email_sync, alert, recipients)
 
 
 async def _send_webhook_notification(alert: Alert):
@@ -130,7 +170,7 @@ async def _save_alert(alert: Alert):
                     alert.signal,
                     alert.confidence,
                     alert.severity,
-                    datetime.utcnow(),
+                    datetime.now(timezone.utc),
                 ),
             )
             await db.commit()
@@ -157,7 +197,7 @@ async def process_consensus_for_alerts(consensus: ConsensusResult):
             signal=signal,
             confidence=confidence,
             severity="warning" if signal == "SELL" else "info",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
         await _save_alert(alert)
 
@@ -171,7 +211,7 @@ async def process_consensus_for_alerts(consensus: ConsensusResult):
             signal=signal,
             confidence=confidence,
             severity=severity,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
         await _save_alert(alert)
 

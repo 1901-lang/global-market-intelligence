@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from models.schemas import AssetPrice, MarketContext, BaseSignal
 
@@ -122,7 +122,7 @@ def generate_signal(
         price_change=chg,
         trend=trend,
         drivers=drivers[:5],
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
     )
 
 

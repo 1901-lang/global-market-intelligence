@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from db import get_db
 from models.schemas import ModelPerformance, ConsensusResult
@@ -45,7 +45,7 @@ async def record_prediction(asset: str, model_name: str):
                     total_predictions = total_predictions + 1,
                     last_updated = ?
                 """,
-                (model_name, asset, datetime.utcnow(), datetime.utcnow()),
+                (model_name, asset, datetime.now(timezone.utc), datetime.now(timezone.utc)),
             )
             await db.commit()
     except Exception as exc:
@@ -85,7 +85,7 @@ async def record_outcome(
                 SET correct_predictions = ?, accuracy = ?, weight = ?, last_updated = ?
                 WHERE model_name = ? AND asset = ?
                 """,
-                (correct, round(accuracy, 4), new_weight, datetime.utcnow(), model_name, asset),
+                (correct, round(accuracy, 4), new_weight, datetime.now(timezone.utc), model_name, asset),
             )
             await db.commit()
     except Exception as exc:
@@ -118,7 +118,7 @@ async def evaluate_past_predictions(current_prices: Dict[str, float]):
     if not current_prices:
         return
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     window_start = now - timedelta(minutes=70)
     window_end = now - timedelta(minutes=50)
 

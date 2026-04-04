@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Dict, Any, List, Optional
 from models.schemas import BaseSignal, MarketContext, ModelOutput
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +163,7 @@ def _to_model_output(asset: str, model_name: str, result: Dict) -> ModelOutput:
         confidence=confidence,
         reasoning=reasoning,
         raw_response=json.dumps(result),
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
     )
 
 

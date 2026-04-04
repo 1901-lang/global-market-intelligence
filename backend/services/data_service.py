@@ -3,7 +3,7 @@ import asyncio
 import httpx
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from models.schemas import AssetPrice, MarketContext
 from db import get_db
@@ -143,7 +143,7 @@ async def fetch_crypto_prices() -> List[AssetPrice]:
                     volume_24h=coin.get("total_volume") or 0.0,
                     market_cap=coin.get("market_cap") or 0.0,
                     asset_type="crypto",
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                 )
             )
     except Exception as exc:
@@ -158,12 +158,12 @@ def _mock_crypto() -> List[AssetPrice]:
         AssetPrice(
             symbol="BTC", name="Bitcoin", price=68500.0,
             change_1h=0.3, change_24h=1.8, volume_24h=28e9, market_cap=1.35e12,
-            asset_type="crypto", timestamp=datetime.utcnow(),
+            asset_type="crypto", timestamp=datetime.now(timezone.utc),
         ),
         AssetPrice(
             symbol="ETH", name="Ethereum", price=3450.0,
             change_1h=-0.1, change_24h=0.9, volume_24h=15e9, market_cap=4.1e11,
-            asset_type="crypto", timestamp=datetime.utcnow(),
+            asset_type="crypto", timestamp=datetime.now(timezone.utc),
         ),
     ]
 
@@ -202,7 +202,7 @@ async def fetch_commodity_prices() -> List[AssetPrice]:
                         volume_24h=0.0,
                         market_cap=0.0,
                         asset_type="commodity",
-                        timestamp=datetime.utcnow(),
+                        timestamp=datetime.now(timezone.utc),
                     )
                 )
             except Exception:
@@ -219,7 +219,7 @@ def _mock_commodity(sym: str, name: str) -> AssetPrice:
     return AssetPrice(
         symbol=sym, name=name, price=defaults.get(sym, 100.0),
         change_1h=0.0, change_24h=0.5, volume_24h=0.0, market_cap=0.0,
-        asset_type="commodity", timestamp=datetime.utcnow(),
+        asset_type="commodity", timestamp=datetime.now(timezone.utc),
     )
 
 
@@ -260,7 +260,7 @@ async def fetch_macro_context() -> MarketContext:
         vix=vix,
         news_sentiment=news_sentiment,
         on_chain_activity=0.62,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
     )
     _set_cache(cache_key, ctx)
     return ctx

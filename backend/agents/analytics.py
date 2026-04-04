@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Any, Dict, List, Optional
 
 from db import get_db
@@ -57,7 +57,7 @@ async def _save_kpi_report(content: str, metrics: Dict):
             await db.execute(
                 "INSERT INTO analytics_reports (content, metrics_json, date, timestamp) "
                 "VALUES (?, ?, ?, ?)",
-                (content, json.dumps(metrics), date.today().isoformat(), datetime.utcnow()),
+                (content, json.dumps(metrics), date.today().isoformat(), datetime.now(timezone.utc)),
             )
             await db.commit()
     except Exception as exc:
@@ -113,7 +113,7 @@ async def _save_activity(action_type: str, summary: str):
             await db.execute(
                 "INSERT INTO agent_activities (agent_name, action_type, summary, timestamp) "
                 "VALUES (?, ?, ?, ?)",
-                ("analytics", action_type, summary, datetime.utcnow()),
+                ("analytics", action_type, summary, datetime.now(timezone.utc)),
             )
             await db.commit()
     except Exception as exc:

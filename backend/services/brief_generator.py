@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import List, Dict, Any, Optional
 from db import get_db
 from models.schemas import Brief, ConsensusResult, AssetPrice, MarketContext
@@ -109,7 +109,7 @@ async def generate_brief(
         key_signals=key_signals,
         risks=risks,
         date=today_str,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
     )
     await _save_brief(brief)
     return brief
@@ -128,7 +128,7 @@ async def _save_brief(brief: Brief):
                     json.dumps(brief.key_signals),
                     json.dumps(brief.risks),
                     brief.date,
-                    datetime.utcnow(),
+                    datetime.now(timezone.utc),
                 ),
             )
             await db.commit()
