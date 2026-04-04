@@ -157,10 +157,13 @@ async def evaluate_past_predictions(current_prices: Dict[str, float]):
                     (asset, pred_time),
                 )
 
-                if price_row is None or price_row["price"] == 0:
+                if price_row is None or not price_row["price"]:
                     continue
 
                 old_price = float(price_row["price"])
+                if old_price <= 0:
+                    continue
+
                 pct_change = (current_price - old_price) / old_price * 100
 
                 if signal == "BUY":

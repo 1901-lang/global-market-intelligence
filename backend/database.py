@@ -200,9 +200,14 @@ def _make_pg_ddl(sqlite_ddl: str) -> str:
 
 
 async def _run_migrations():
-    """Apply additive schema migrations for existing databases."""
+    """Apply additive schema migrations for existing databases.
+
+    Each statement is wrapped in a try/except so that already-applied
+    migrations (e.g. column already exists) are silently skipped.
+    """
     migrations = [
-        # Add evaluated_at to model_outputs (learning engine wire-up)
+        # evaluated_at: tracks when a model_output was outcome-evaluated so the
+        # learning engine (evaluate_past_predictions) never double-counts a row.
         "ALTER TABLE model_outputs ADD COLUMN evaluated_at TIMESTAMP DEFAULT NULL",
         # configured_assets and user_preferences are handled by CREATE TABLE IF NOT EXISTS
     ]

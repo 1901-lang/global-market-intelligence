@@ -164,6 +164,35 @@ export default function Home() {
   const [briefLoading, setBriefLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const tokenRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Stable ref to the schedule function so doTokenRefresh can call it without
+  // creating a circular useCallback dependency.
+  const scheduleTokenRefreshRef = useRef<() => void>(() => {})
+
+  /**
+   * Perform a token refresh and then re-schedule the next one.
+   * Reads/writes localStorage directly so it can be called from a setTimeout
+   * without needing fresh React state.
+   */
+  const doTokenRefresh = useCallback(async () => {
+    const refreshToken = localStorage.getItem('aip_refresh_token')
+    if (!refreshToken) return
+    try {
+      const res = await fetch(`${API_URL}/api/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      })
+      if (res.ok) {
+        const { access_token, refresh_token } = await res.json()
+        localStorage.setItem('aip_token', access_token)
+        localStorage.setItem('aip_refresh_token', refresh_token)
+        // Re-schedule for the new token's expiry via the stable ref
+        scheduleTokenRefreshRef.current()
+      }
+    } catch {
+      // Silently ignore — user will get a 401 on next API call and be redirected
+    }
+  }, [])
 
   /** Schedule a proactive token refresh ~TOKEN_REFRESH_BUFFER_MS before expiry. */
   const scheduleTokenRefresh = useCallback(() => {
@@ -185,29 +214,14 @@ export default function Home() {
       return
     }
 
-    tokenRefreshTimer.current = setTimeout(async () => {
-      await doTokenRefresh()
+    tokenRefreshTimer.current = setTimeout(() => {
+      void doTokenRefresh()
     }, msUntilRefresh)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [doTokenRefresh])
 
-  const doTokenRefresh = useCallback(async () => {
-    const refreshToken = localStorage.getItem('aip_refresh_token')
-    if (!refreshToken) return
-    try {
-      const res = await fetch(`${API_URL}/api/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      })
-      if (res.ok) {
-        const { access_token, refresh_token } = await res.json()
-        localStorage.setItem('aip_token', access_token)
-        localStorage.setItem('aip_refresh_token', refresh_token)
-        scheduleTokenRefresh()
-      }
-    } catch {
-      // Silently ignore — user will get a 401 on next API call and be redirected
-    }
+  // Keep the ref in sync with the latest scheduleTokenRefresh callback
+  useEffect(() => {
+    scheduleTokenRefreshRef.current = scheduleTokenRefresh
   }, [scheduleTokenRefresh])
 
   const fetchData = useCallback(async () => {

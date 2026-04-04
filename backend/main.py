@@ -33,7 +33,7 @@ from auth import (
     _decode_token,
 )
 from database import init_db
-from pydantic import BaseModel as _BaseModel
+from pydantic import BaseModel as PydanticBaseModel
 
 from db import get_db
 from models.schemas import (
@@ -62,14 +62,14 @@ from models.schemas import (
 
 # ── Request/response models for new endpoints ──────────────────────────────────
 
-class AssetConfigRequest(_BaseModel):
+class AssetConfigRequest(PydanticBaseModel):
     symbol: str
     name: str
     asset_type: str   # "crypto" or "commodity"
     source_id: str    # CoinGecko ID for crypto, Yahoo Finance ticker for commodity
 
 
-class UserPreferencesModel(_BaseModel):
+class UserPreferencesModel(PydanticBaseModel):
     preferred_assets: List[str] = []
     notify_email: bool = True
     email_address: Optional[str] = None

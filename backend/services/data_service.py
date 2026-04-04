@@ -95,7 +95,7 @@ async def load_configured_assets():
         logger.warning("load_configured_assets failed: %s", exc)
         return
 
-    # Remove the four defaults so they aren't duplicated (defaults always merged in)
+    # Remove default assets to avoid duplication — they are always merged in at call time
     for sym in _DEFAULT_CRYPTO:
         new_crypto.pop(sym, None)
     for sym in _DEFAULT_COMMODITY:
@@ -104,8 +104,11 @@ async def load_configured_assets():
     _runtime_crypto = new_crypto
     _runtime_commodity = new_commodity
     logger.info(
-        "Asset config reloaded: %d crypto, %d commodity (+ %d default assets)",
-        len(new_crypto), len(new_commodity), len(_DEFAULT_CRYPTO) + len(_DEFAULT_COMMODITY),
+        "Asset config reloaded: %d extra crypto, %d extra commodity (defaults: %d crypto, %d commodity)",
+        len(new_crypto),
+        len(new_commodity),
+        len(_DEFAULT_CRYPTO),
+        len(_DEFAULT_COMMODITY),
     )
 
 

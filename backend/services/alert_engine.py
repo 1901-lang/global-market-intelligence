@@ -56,15 +56,17 @@ def _send_email_sync(alert: Alert):
     if not recipients:
         return
     try:
+        import ssl
         msg = MIMEMultipart("alternative")
         msg["Subject"] = f"[AIP Alert] {alert.asset} {alert.signal} — {alert.severity.upper()}"
         msg["From"] = _SMTP_FROM or _SMTP_USER
         msg["To"] = ", ".join(recipients)
         msg.attach(MIMEText(_build_email_body(alert), "plain"))
 
+        ssl_context = ssl.create_default_context()
         with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT) as server:
             server.ehlo()
-            server.starttls()
+            server.starttls(context=ssl_context)
             if _SMTP_USER and _SMTP_PASSWORD:
                 server.login(_SMTP_USER, _SMTP_PASSWORD)
             server.sendmail(msg["From"], recipients, msg.as_string())

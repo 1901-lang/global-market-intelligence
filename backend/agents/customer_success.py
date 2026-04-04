@@ -175,8 +175,11 @@ async def onboard_user(name: str, interest: str, experience: str, state: Dict) -
 
 async def run_daily_check(state: Dict):
     """Collect platform engagement metrics and log a daily analytics snapshot."""
+    from datetime import timedelta
     assets = state.get("assets", [])
-    today = datetime.utcnow().date().isoformat()
+    now = datetime.utcnow()
+    today = now.date().isoformat()
+    seven_days_ago = now - timedelta(days=7)
 
     metrics: Dict = {"date": today, "assets_tracked": len(assets)}
 
@@ -189,7 +192,8 @@ async def run_daily_check(state: Dict):
             # Distinct chat sessions in the last 7 days
             row = await db.fetchone(
                 "SELECT COUNT(DISTINCT session_id) AS cnt FROM support_chats "
-                "WHERE timestamp >= datetime('now', '-7 days')"
+                "WHERE timestamp >= ?",
+                (seven_days_ago,),
             )
             metrics["chat_sessions_7d"] = row["cnt"] if row else 0
 
