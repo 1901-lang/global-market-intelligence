@@ -1,6 +1,11 @@
+import asyncio
 import json
 import logging
+import os
+import smtplib
 from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import List, Optional
 from db import get_db
 from models.schemas import Alert, ConsensusResult
@@ -9,6 +14,103 @@ logger = logging.getLogger(__name__)
 
 HIGH_CONFIDENCE_THRESHOLD = 0.65
 _previous_signals: dict = {}
+
+# ── Outbound notification configuration ──────────────────────────────────────
+_ALERT_EMAIL_TO: str = os.getenv("ALERT_EMAIL_TO", "")      # comma-separated
+_SMTP_HOST: str = os.getenv("SMTP_HOST", "")
+_SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+_SMTP_USER: str = os.getenv("SMTP_USER", "")
+_SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
+_SMTP_FROM: str = os.getenv("SMTP_FROM", _SMTP_USER)
+_ALERT_WEBHOOK_URL: str = os.getenv("ALERT_WEBHOOK_URL", "")
+# Only dispatch notifications for alerts at or above this severity level.
+# Values (ascending): info < warning < critical
+_ALERT_MIN_SEVERITY: str = os.getenv("ALERT_MIN_SEVERITY", "warning")
+
+_SEVERITY_RANK = {"info": 0, "warning": 1, "critical": 2}
+
+
+def _severity_meets_threshold(severity: str) -> bool:
+    return _SEVERITY_RANK.get(severity, 0) >= _SEVERITY_RANK.get(_ALERT_MIN_SEVERITY, 1)
+
+
+def _build_email_body(alert: Alert) -> str:
+    return (
+        f"AIP Market Alert\n"
+        f"{'=' * 40}\n"
+        f"Asset    : {alert.asset}\n"
+        f"Signal   : {alert.signal}\n"
+        f"Severity : {alert.severity.upper()}\n"
+        f"Confidence: {alert.confidence:.0%}\n"
+        f"Type     : {alert.alert_type}\n\n"
+        f"{alert.message}\n\n"
+        f"Timestamp: {alert.timestamp}\n"
+        f"{'=' * 40}\n"
+        "This is an automated alert from the AIP Market Intelligence Platform.\n"
+    )
+
+
+def _send_email_sync(alert: Alert):
+    """Synchronous SMTP send — run in a thread executor."""
+    recipients = [r.strip() for r in _ALERT_EMAIL_TO.split(",") if r.strip()]
+    if not recipients:
+        return
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"[AIP Alert] {alert.asset} {alert.signal} — {alert.severity.upper()}"
+        msg["From"] = _SMTP_FROM or _SMTP_USER
+        msg["To"] = ", ".join(recipients)
+        msg.attach(MIMEText(_build_email_body(alert), "plain"))
+
+        with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            if _SMTP_USER and _SMTP_PASSWORD:
+                server.login(_SMTP_USER, _SMTP_PASSWORD)
+            server.sendmail(msg["From"], recipients, msg.as_string())
+        logger.info("Alert email sent for %s %s to %d recipient(s)", alert.asset, alert.signal, len(recipients))
+    except Exception as exc:
+        logger.warning("Alert email failed: %s", exc)
+
+
+async def _send_email_notification(alert: Alert):
+    if not (_SMTP_HOST and _ALERT_EMAIL_TO):
+        return
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _send_email_sync, alert)
+
+
+async def _send_webhook_notification(alert: Alert):
+    if not _ALERT_WEBHOOK_URL:
+        return
+    try:
+        import httpx
+        payload = {
+            "asset": alert.asset,
+            "signal": alert.signal,
+            "confidence": alert.confidence,
+            "severity": alert.severity,
+            "alert_type": alert.alert_type,
+            "message": alert.message,
+            "timestamp": alert.timestamp.isoformat() if alert.timestamp else None,
+        }
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(_ALERT_WEBHOOK_URL, json=payload)
+            resp.raise_for_status()
+        logger.info("Alert webhook delivered for %s %s (status %s)", alert.asset, alert.signal, resp.status_code)
+    except Exception as exc:
+        logger.warning("Alert webhook failed: %s", exc)
+
+
+async def _dispatch_notification(alert: Alert):
+    """Fire email and/or webhook notifications when severity meets threshold."""
+    if not _severity_meets_threshold(alert.severity):
+        return
+    await asyncio.gather(
+        _send_email_notification(alert),
+        _send_webhook_notification(alert),
+        return_exceptions=True,
+    )
 
 
 async def _save_alert(alert: Alert):
@@ -32,6 +134,10 @@ async def _save_alert(alert: Alert):
             await db.commit()
     except Exception as exc:
         logger.warning(f"_save_alert failed: {exc}")
+        return
+
+    # Dispatch outbound notifications (email / webhook) — non-blocking
+    await _dispatch_notification(alert)
 
 
 async def process_consensus_for_alerts(consensus: ConsensusResult):

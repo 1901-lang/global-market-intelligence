@@ -5,9 +5,9 @@ Environment variables
 SECRET_KEY                  (required in production) — random secret for signing JWTs.
 ACCESS_TOKEN_EXPIRE_MINUTES  defaults to 30.
 REFRESH_TOKEN_EXPIRE_DAYS    defaults to 7.
-REQUIRE_AUTH                 set to "true" to enforce authentication on all protected
-                              endpoints; defaults to "false" for backwards-compatible
-                              local development.
+REQUIRE_AUTH                 set to "false" to disable authentication (local dev only);
+                              defaults to "true" — authentication is always enforced
+                              in production unless explicitly disabled.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ SECRET_KEY: str = os.getenv("SECRET_KEY", "")
 ALGORITHM: str = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
-REQUIRE_AUTH: bool = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
+REQUIRE_AUTH: bool = os.getenv("REQUIRE_AUTH", "true").lower() == "true"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 

@@ -174,7 +174,53 @@ async def onboard_user(name: str, interest: str, experience: str, state: Dict) -
 
 
 async def run_daily_check(state: Dict):
-    """Log a daily engagement check — placeholder for future user analytics."""
+    """Collect platform engagement metrics and log a daily analytics snapshot."""
     assets = state.get("assets", [])
-    logger.info("CustomerSuccess: daily check — %d assets tracked", len(assets))
-    await _save_activity("daily_check", f"{len(assets)} assets active on platform")
+    today = datetime.utcnow().date().isoformat()
+
+    metrics: Dict = {"date": today, "assets_tracked": len(assets)}
+
+    try:
+        async with get_db() as db:
+            # Active user count
+            row = await db.fetchone("SELECT COUNT(*) AS cnt FROM users WHERE is_active = 1")
+            metrics["active_users"] = row["cnt"] if row else 0
+
+            # Distinct chat sessions in the last 7 days
+            row = await db.fetchone(
+                "SELECT COUNT(DISTINCT session_id) AS cnt FROM support_chats "
+                "WHERE timestamp >= datetime('now', '-7 days')"
+            )
+            metrics["chat_sessions_7d"] = row["cnt"] if row else 0
+
+            # Agent activities today
+            row = await db.fetchone(
+                "SELECT COUNT(*) AS cnt FROM agent_activities "
+                "WHERE timestamp >= ?",
+                (today,),
+            )
+            metrics["agent_activities_today"] = row["cnt"] if row else 0
+
+            # Alerts generated today
+            row = await db.fetchone(
+                "SELECT COUNT(*) AS cnt FROM alerts WHERE timestamp >= ?",
+                (today,),
+            )
+            metrics["alerts_today"] = row["cnt"] if row else 0
+
+            # High-confidence alerts today
+            row = await db.fetchone(
+                "SELECT COUNT(*) AS cnt FROM alerts WHERE timestamp >= ? AND severity = 'critical'",
+                (today,),
+            )
+            metrics["critical_alerts_today"] = row["cnt"] if row else 0
+    except Exception as exc:
+        logger.warning("run_daily_check DB queries failed: %s", exc)
+
+    logger.info("CustomerSuccess daily check: %s", metrics)
+    await _save_activity(
+        "daily_check",
+        f"users={metrics.get('active_users', '?')} "
+        f"sessions_7d={metrics.get('chat_sessions_7d', '?')} "
+        f"alerts_today={metrics.get('alerts_today', '?')}",
+    )

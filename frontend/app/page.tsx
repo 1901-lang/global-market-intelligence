@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import AssetCard from './components/AssetCard'
 import AlertFeed from './components/AlertFeed'
 import AnalyticsPanel from './components/AnalyticsPanel'
@@ -17,12 +17,24 @@ const REFRESH_DELAY_MS = 3000
 // Delay (ms) after requesting brief generation before polling for the result,
 // allowing the AI generation to complete.
 const BRIEF_GENERATION_DELAY_MS = 5000
+// How many ms before token expiry to proactively refresh (5 minutes)
+const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000
 
 /** Build fetch headers, attaching the JWT token when available. */
 function authHeaders(): HeadersInit {
   if (typeof window === 'undefined') return {}
   const token = localStorage.getItem('aip_token')
   return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+/** Decode the expiry timestamp (seconds) from a JWT without verifying it. */
+function getTokenExpiry(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    return typeof payload.exp === 'number' ? payload.exp : null
+  } catch {
+    return null
+  }
 }
 
 interface Asset {
@@ -151,6 +163,52 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false)
   const [briefLoading, setBriefLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const tokenRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /** Schedule a proactive token refresh ~TOKEN_REFRESH_BUFFER_MS before expiry. */
+  const scheduleTokenRefresh = useCallback(() => {
+    if (typeof window === 'undefined') return
+    const token = localStorage.getItem('aip_token')
+    if (!token) return
+
+    const exp = getTokenExpiry(token)
+    if (!exp) return
+
+    const msUntilExpiry = exp * 1000 - Date.now()
+    const msUntilRefresh = msUntilExpiry - TOKEN_REFRESH_BUFFER_MS
+
+    if (tokenRefreshTimer.current) clearTimeout(tokenRefreshTimer.current)
+
+    if (msUntilRefresh <= 0) {
+      // Already within the buffer window — refresh immediately
+      void doTokenRefresh()
+      return
+    }
+
+    tokenRefreshTimer.current = setTimeout(async () => {
+      await doTokenRefresh()
+    }, msUntilRefresh)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const doTokenRefresh = useCallback(async () => {
+    const refreshToken = localStorage.getItem('aip_refresh_token')
+    if (!refreshToken) return
+    try {
+      const res = await fetch(`${API_URL}/api/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      })
+      if (res.ok) {
+        const { access_token, refresh_token } = await res.json()
+        localStorage.setItem('aip_token', access_token)
+        localStorage.setItem('aip_refresh_token', refresh_token)
+        scheduleTokenRefresh()
+      }
+    } catch {
+      // Silently ignore — user will get a 401 on next API call and be redirected
+    }
+  }, [scheduleTokenRefresh])
 
   const fetchData = useCallback(async () => {
     try {
@@ -202,9 +260,13 @@ export default function Home() {
   useEffect(() => {
     fetchData()
     fetchBrief()
+    scheduleTokenRefresh()
     const interval = setInterval(fetchData, 60000)
-    return () => clearInterval(interval)
-  }, [fetchData, fetchBrief])
+    return () => {
+      clearInterval(interval)
+      if (tokenRefreshTimer.current) clearTimeout(tokenRefreshTimer.current)
+    }
+  }, [fetchData, fetchBrief, scheduleTokenRefresh])
 
   const consensus = data?.consensus || []
 

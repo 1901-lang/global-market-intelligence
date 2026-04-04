@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from db import get_db
 from models.schemas import ModelPerformance, ConsensusResult
@@ -11,6 +11,9 @@ MODEL_NAMES = ["openai", "claude", "gemini"]
 DEFAULT_WEIGHT = 1.0
 MIN_WEIGHT = 0.2
 MAX_WEIGHT = 2.0
+
+# Minimum absolute price change (%) to classify a BUY/SELL as directionally correct
+_CORRECT_THRESHOLD_PCT = 0.05
 
 
 async def get_model_weights(asset: str) -> Dict[str, float]:
@@ -99,3 +102,87 @@ async def get_all_performance() -> List[Dict]:
     except Exception as exc:
         logger.warning(f"get_all_performance failed: {exc}")
         return []
+
+
+async def evaluate_past_predictions(current_prices: Dict[str, float]):
+    """Evaluate model predictions made ~1 hour ago against current prices.
+
+    Queries model_outputs with `evaluated_at IS NULL` that are between 50 and
+    70 minutes old, compares each model's signal to the price direction, and
+    calls record_outcome() accordingly.  Marks each row as evaluated so it is
+    not counted twice even across restarts.
+
+    Args:
+        current_prices: mapping of symbol → current price (e.g. {"BTC": 68500.0}).
+    """
+    if not current_prices:
+        return
+
+    now = datetime.utcnow()
+    window_start = now - timedelta(minutes=70)
+    window_end = now - timedelta(minutes=50)
+
+    try:
+        async with get_db() as db:
+            rows = await db.fetchall(
+                """
+                SELECT id, asset, model_name, signal, timestamp
+                FROM model_outputs
+                WHERE evaluated_at IS NULL
+                  AND timestamp >= ?
+                  AND timestamp <= ?
+                """,
+                (window_start, window_end),
+            )
+
+        for row in rows:
+            asset = row["asset"]
+            model_name = row["model_name"]
+            signal = row["signal"]
+            row_id = row["id"]
+            pred_time = row["timestamp"]
+
+            current_price = current_prices.get(asset)
+            if current_price is None:
+                continue
+
+            # Retrieve the price closest to (but not after) the prediction timestamp
+            async with get_db() as db:
+                price_row = await db.fetchone(
+                    """
+                    SELECT price FROM price_data
+                    WHERE symbol = ? AND timestamp <= ?
+                    ORDER BY timestamp DESC LIMIT 1
+                    """,
+                    (asset, pred_time),
+                )
+
+                if price_row is None or price_row["price"] == 0:
+                    continue
+
+                old_price = float(price_row["price"])
+                pct_change = (current_price - old_price) / old_price * 100
+
+                if signal == "BUY":
+                    was_correct = pct_change > _CORRECT_THRESHOLD_PCT
+                elif signal == "SELL":
+                    was_correct = pct_change < -_CORRECT_THRESHOLD_PCT
+                else:  # HOLD — correct when price barely moved
+                    was_correct = abs(pct_change) < 1.0
+
+                await record_outcome(asset, model_name, was_correct)
+
+                # Mark this output as evaluated so it is never double-counted
+                await db.execute(
+                    "UPDATE model_outputs SET evaluated_at = ? WHERE id = ?",
+                    (now, row_id),
+                )
+                await db.commit()
+
+            logger.debug(
+                "Outcome: %s/%s signal=%s pct=%.2f%% correct=%s",
+                model_name, asset, signal, pct_change, was_correct,
+            )
+
+    except Exception as exc:
+        logger.warning("evaluate_past_predictions failed: %s", exc)

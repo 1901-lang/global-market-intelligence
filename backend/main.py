@@ -33,6 +33,8 @@ from auth import (
     _decode_token,
 )
 from database import init_db
+from pydantic import BaseModel as _BaseModel
+
 from db import get_db
 from models.schemas import (
     AdminQueryRequest,
@@ -56,14 +58,32 @@ from models.schemas import (
     OnboardRequest,
     OrchestratorBriefing,
 )
+
+
+# ── Request/response models for new endpoints ──────────────────────────────────
+
+class AssetConfigRequest(_BaseModel):
+    symbol: str
+    name: str
+    asset_type: str   # "crypto" or "commodity"
+    source_id: str    # CoinGecko ID for crypto, Yahoo Finance ticker for commodity
+
+
+class UserPreferencesModel(_BaseModel):
+    preferred_assets: List[str] = []
+    notify_email: bool = True
+    email_address: Optional[str] = None
+    notifications_enabled: bool = True
 from security import sanitize_input
-from services.data_service import fetch_all_assets, fetch_macro_context
+from services.data_service import fetch_all_assets, fetch_macro_context, load_configured_assets
 from services.signal_engine import generate_all_signals
 from services.model_wrapper import query_all_models, debate_loop
 from services.consensus_engine import compute_consensus
 from services.learning_engine import (
     get_model_weights,
     record_prediction,
+    record_outcome,
+    evaluate_past_predictions,
     get_all_performance,
 )
 from services.alert_engine import (
@@ -148,6 +168,10 @@ async def run_update_cycle():
         _state["consensus"] = all_consensus
         _state["model_outputs"] = all_model_outputs
         _state["last_updated"] = datetime.utcnow()
+
+        # Evaluate predictions made ~1 hour ago against current prices
+        current_prices = {a.symbol: a.price for a in assets}
+        await evaluate_past_predictions(current_prices)
 
         logger.info(f"Update cycle complete. Assets: {len(assets)}, Consensus results: {len(all_consensus)}")
     except Exception as exc:
@@ -285,6 +309,7 @@ def _startup_key_check():
 async def lifespan(app: FastAPI):
     _startup_key_check()
     await init_db()
+    await load_configured_assets()
     asyncio.create_task(_background_scheduler())
     agent_scheduler = _make_agent_scheduler()
     agent_scheduler.start()
@@ -777,3 +802,150 @@ async def anomaly_check(
     """Run anomaly detection on a custom metrics dictionary."""
     result = await analytics_agent.check_anomalies_from_metrics(req.metrics)
     return {"analysis": result}
+
+
+# ── Admin: asset configuration ────────────────────────────────────────────────
+
+@app.get("/api/admin/assets")
+async def list_configured_assets(_: User = Depends(require_role("admin"))):
+    """List all assets in the configured_assets table (active and inactive)."""
+    try:
+        async with get_db() as db:
+            rows = await db.fetchall(
+                "SELECT symbol, name, asset_type, source_id, is_active, created_at "
+                "FROM configured_assets ORDER BY asset_type, symbol"
+            )
+        return list(rows)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/admin/assets", status_code=201)
+@limiter.limit("20/minute")
+async def add_configured_asset(
+    request: Request,
+    body: AssetConfigRequest,
+    _: User = Depends(require_role("admin")),
+):
+    """Add a new asset to the platform (admin only).
+
+    For crypto, supply the CoinGecko coin ID as ``source_id`` (e.g. ``solana``).
+    For commodity, supply the Yahoo Finance ticker (e.g. ``SI=F`` for Silver).
+    """
+    symbol = body.symbol.upper().strip()
+    if body.asset_type not in ("crypto", "commodity"):
+        raise HTTPException(status_code=400, detail="asset_type must be 'crypto' or 'commodity'")
+    try:
+        async with get_db() as db:
+            await db.execute(
+                """
+                INSERT INTO configured_assets (symbol, name, asset_type, source_id, is_active)
+                VALUES (?, ?, ?, ?, 1)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    name = excluded.name,
+                    asset_type = excluded.asset_type,
+                    source_id = excluded.source_id,
+                    is_active = 1
+                """,
+                (symbol, body.name, body.asset_type, body.source_id),
+            )
+            await db.commit()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    # Refresh in-memory asset lists
+    await load_configured_assets()
+    # Invalidate price caches so new asset is fetched on next cycle
+    from services.data_service import _cache
+    _cache.pop("crypto_prices", None)
+    _cache.pop("commodity_prices", None)
+
+    return {"status": "ok", "symbol": symbol}
+
+
+@app.delete("/api/admin/assets/{symbol}")
+async def remove_configured_asset(
+    symbol: str,
+    _: User = Depends(require_role("admin")),
+):
+    """Deactivate an asset (soft-delete).  Default assets can be deactivated
+    but will reappear on next restart (they are re-seeded via ``seed_default_assets``).
+    """
+    sym = symbol.upper().strip()
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE configured_assets SET is_active = 0 WHERE symbol = ?",
+                (sym,),
+            )
+            await db.commit()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    await load_configured_assets()
+    from services.data_service import _cache
+    _cache.pop("crypto_prices", None)
+    _cache.pop("commodity_prices", None)
+
+    return {"status": "ok", "symbol": sym}
+
+
+# ── User preferences / portfolio ──────────────────────────────────────────────
+
+@app.get("/api/preferences")
+async def get_preferences(current_user: User = Depends(require_auth)):
+    """Return the authenticated user's preferences."""
+    try:
+        async with get_db() as db:
+            row = await db.fetchone(
+                "SELECT preferred_assets, notify_email, email_address, notifications_enabled "
+                "FROM user_preferences WHERE user_id = ?",
+                (current_user.id,),
+            )
+        if row is None:
+            return UserPreferencesModel()
+        return UserPreferencesModel(
+            preferred_assets=json.loads(row["preferred_assets"] or "[]"),
+            notify_email=bool(row["notify_email"]),
+            email_address=row["email_address"] or None,
+            notifications_enabled=bool(row["notifications_enabled"]),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.put("/api/preferences")
+async def update_preferences(
+    body: UserPreferencesModel,
+    current_user: User = Depends(require_auth),
+):
+    """Create or update the authenticated user's preferences."""
+    if current_user.id is None:
+        raise HTTPException(status_code=400, detail="Cannot save preferences for anonymous user")
+    try:
+        async with get_db() as db:
+            await db.execute(
+                """
+                INSERT INTO user_preferences
+                    (user_id, preferred_assets, notify_email, email_address, notifications_enabled, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    preferred_assets = excluded.preferred_assets,
+                    notify_email = excluded.notify_email,
+                    email_address = excluded.email_address,
+                    notifications_enabled = excluded.notifications_enabled,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    current_user.id,
+                    json.dumps(body.preferred_assets),
+                    1 if body.notify_email else 0,
+                    body.email_address or "",
+                    1 if body.notifications_enabled else 0,
+                    datetime.utcnow(),
+                ),
+            )
+            await db.commit()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"status": "ok"}

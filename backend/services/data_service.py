@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from models.schemas import AssetPrice, MarketContext
+from db import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -13,15 +14,26 @@ COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 NEWS_API_BASE = "https://newsapi.org/v2"
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 
-CRYPTO_ASSETS = {
+# ── Default assets (always present) ──────────────────────────────────────────
+_DEFAULT_CRYPTO: Dict[str, Dict] = {
     "BTC": {"id": "bitcoin", "name": "Bitcoin"},
     "ETH": {"id": "ethereum", "name": "Ethereum"},
 }
 
-COMMODITY_SYMBOLS = {
+_DEFAULT_COMMODITY: Dict[str, Dict] = {
     "GOLD": {"ticker": "GC=F", "name": "Gold"},
-    "OIL": {"ticker": "CL=F", "name": "Crude Oil"},
+    "OIL":  {"ticker": "CL=F", "name": "Crude Oil"},
 }
+
+# ── Runtime-configurable assets (merged with defaults) ───────────────────────
+# These are populated from the `configured_assets` DB table at startup and
+# refreshed whenever an admin adds / removes an asset via the API.
+_runtime_crypto: Dict[str, Dict] = {}
+_runtime_commodity: Dict[str, Dict] = {}
+
+# Keep the old names as aliases for backwards compatibility with any direct imports
+CRYPTO_ASSETS = _DEFAULT_CRYPTO
+COMMODITY_SYMBOLS = _DEFAULT_COMMODITY
 
 MACRO_SYMBOLS = {
     "USD_INDEX": "DX-Y.NYB",
@@ -45,12 +57,65 @@ def _set_cache(key: str, value: Any):
     _cache_ttl[key] = time.time()
 
 
+def get_active_crypto_assets() -> Dict[str, Dict]:
+    """Return the current merged crypto asset map (defaults + admin-added)."""
+    merged = dict(_DEFAULT_CRYPTO)
+    merged.update(_runtime_crypto)
+    return merged
+
+
+def get_active_commodity_assets() -> Dict[str, Dict]:
+    """Return the current merged commodity asset map (defaults + admin-added)."""
+    merged = dict(_DEFAULT_COMMODITY)
+    merged.update(_runtime_commodity)
+    return merged
+
+
+async def load_configured_assets():
+    """Reload the runtime asset lists from the `configured_assets` DB table.
+
+    This is called at startup (from main.py) and after any admin asset change.
+    Thread-safe because Python dict assignment is atomic on CPython.
+    """
+    global _runtime_crypto, _runtime_commodity
+    new_crypto: Dict[str, Dict] = {}
+    new_commodity: Dict[str, Dict] = {}
+    try:
+        async with get_db() as db:
+            rows = await db.fetchall(
+                "SELECT symbol, name, asset_type, source_id FROM configured_assets WHERE is_active = 1"
+            )
+        for row in rows:
+            sym = row["symbol"].upper()
+            if row["asset_type"] == "crypto":
+                new_crypto[sym] = {"id": row["source_id"], "name": row["name"]}
+            elif row["asset_type"] == "commodity":
+                new_commodity[sym] = {"ticker": row["source_id"], "name": row["name"]}
+    except Exception as exc:
+        logger.warning("load_configured_assets failed: %s", exc)
+        return
+
+    # Remove the four defaults so they aren't duplicated (defaults always merged in)
+    for sym in _DEFAULT_CRYPTO:
+        new_crypto.pop(sym, None)
+    for sym in _DEFAULT_COMMODITY:
+        new_commodity.pop(sym, None)
+
+    _runtime_crypto = new_crypto
+    _runtime_commodity = new_commodity
+    logger.info(
+        "Asset config reloaded: %d crypto, %d commodity (+ %d default assets)",
+        len(new_crypto), len(new_commodity), len(_DEFAULT_CRYPTO) + len(_DEFAULT_COMMODITY),
+    )
+
+
 async def fetch_crypto_prices() -> List[AssetPrice]:
     cache_key = "crypto_prices"
     if _is_cached(cache_key):
         return _cache[cache_key]
 
-    ids = ",".join(info["id"] for info in CRYPTO_ASSETS.values())
+    active_crypto = get_active_crypto_assets()
+    ids = ",".join(info["id"] for info in active_crypto.values())
     url = (
         f"{COINGECKO_BASE}/coins/markets"
         f"?vs_currency=usd&ids={ids}"
@@ -62,7 +127,7 @@ async def fetch_crypto_prices() -> List[AssetPrice]:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
-        symbol_map = {info["id"]: sym for sym, info in CRYPTO_ASSETS.items()}
+        symbol_map = {info["id"]: sym for sym, info in active_crypto.items()}
         for coin in data:
             sym = symbol_map.get(coin["id"], coin["symbol"].upper())
             results.append(
@@ -105,12 +170,13 @@ async def fetch_commodity_prices() -> List[AssetPrice]:
     if _is_cached(cache_key):
         return _cache[cache_key]
 
+    active_commodities = get_active_commodity_assets()
     results: List[AssetPrice] = []
     try:
         import yfinance as yf
-        tickers = [info["ticker"] for info in COMMODITY_SYMBOLS.values()]
+        tickers = [info["ticker"] for info in active_commodities.values()]
         data = yf.download(tickers, period="2d", interval="1d", progress=False, auto_adjust=True)
-        for sym, info in COMMODITY_SYMBOLS.items():
+        for sym, info in active_commodities.items():
             ticker = info["ticker"]
             try:
                 closes = data["Close"][ticker].dropna()
@@ -140,7 +206,7 @@ async def fetch_commodity_prices() -> List[AssetPrice]:
                 results.append(_mock_commodity(sym, info["name"]))
     except Exception as exc:
         logger.warning(f"yfinance commodity fetch failed: {exc}. Using mock data.")
-        results = [_mock_commodity(s, i["name"]) for s, i in COMMODITY_SYMBOLS.items()]
+        results = [_mock_commodity(s, i["name"]) for s, i in active_commodities.items()]
     _set_cache(cache_key, results)
     return results
 
