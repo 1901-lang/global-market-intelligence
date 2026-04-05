@@ -292,8 +292,9 @@ def _startup_key_check():
     missing = []
     if not os.getenv("OPENAI_API_KEY"):
         missing.append("OPENAI_API_KEY")
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        missing.append("ANTHROPIC_API_KEY")
+    # Accept either a direct Anthropic key or an OpenRouter key for Claude.
+    if not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("OPENROUTER_API_KEY"):
+        missing.append("ANTHROPIC_API_KEY or OPENROUTER_API_KEY")
     if not os.getenv("GEMINI_API_KEY"):
         missing.append("GEMINI_API_KEY")
     if REQUIRE_AUTH and not SECRET_KEY:

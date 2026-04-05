@@ -30,7 +30,7 @@ const MODEL_ICONS: Record<string, string> = {
 const MODEL_LABELS: Record<string, string> = {
   openai: 'GPT-5.4',
   claude: 'Claude Opus 4.6',
-  gemini: 'Gemini 3.1 Pro',
+  gemini: 'Gemini 3.6 Pro',
 }
 
 function ModelCard({
