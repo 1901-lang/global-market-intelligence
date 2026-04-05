@@ -1146,7 +1146,7 @@ async def update_user(
     return {"status": "ok", "username": username}
 
 
-
+# ── User preferences / portfolio ──────────────────────────────────────────────
 
 @app.get("/api/preferences")
 async def get_preferences(current_user: User = Depends(require_auth)):

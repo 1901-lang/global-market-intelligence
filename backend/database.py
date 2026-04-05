@@ -254,10 +254,16 @@ async def seed_admin_user():
 
     Only runs when both vars are set and no user with that username already exists.
     This gives fresh deployments a working admin account without manual DB access.
+    The password must be at least 8 characters long.
     """
     username = os.environ.get("ADMIN_USERNAME", "").strip()
     password = os.environ.get("ADMIN_PASSWORD", "").strip()
     if not username or not password:
+        return
+    if len(password) < 8:
+        logger.warning(
+            "ADMIN_PASSWORD is too short (minimum 8 characters) — skipping admin seed"
+        )
         return
     from auth import create_user, get_user_by_username, UserCreate
 
