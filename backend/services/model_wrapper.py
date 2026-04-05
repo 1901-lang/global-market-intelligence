@@ -11,11 +11,17 @@ logger = logging.getLogger(__name__)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+# OpenRouter provides access to Claude (and other models) via an OpenAI-compatible API.
+# Set OPENROUTER_API_KEY when using OpenRouter instead of a direct Anthropic key.
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # Model identifiers — latest/most advanced versions for deep market analysis
 OPENAI_MODEL = "gpt-5.4"          # OpenAI GPT-5.4
-CLAUDE_MODEL = "claude-opus-4-6"  # Anthropic Claude Opus 4.6
-GEMINI_MODEL = "gemini-3.1-pro"   # Google Gemini 3.1 Pro
+CLAUDE_MODEL = "claude-opus-4-6"  # Anthropic Claude Opus 4.6 (direct)
+# OpenRouter model name for Claude Opus (override via OPENROUTER_CLAUDE_MODEL env var)
+OPENROUTER_CLAUDE_MODEL = os.getenv("OPENROUTER_CLAUDE_MODEL", "anthropic/claude-opus-4-5")
+GEMINI_MODEL = "gemini-3.6-pro"   # Google Gemini 3.6 Pro
 
 SYSTEM_PROMPT = (
     "You are a quantitative market analyst AI. "
@@ -101,22 +107,46 @@ async def query_openai(
 
 
 async def query_claude(prompt: str) -> Dict[str, Any]:
-    if not ANTHROPIC_API_KEY:
-        return _fallback_response("claude")
-    try:
-        import anthropic
-        client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-        message = await client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=300,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = message.content[0].text if message.content else ""
-        return _parse_model_response(raw)
-    except Exception as exc:
-        logger.warning(f"Claude error: {exc}")
-        return _fallback_response("claude")
+    # Prefer a direct Anthropic key; fall back to OpenRouter if available.
+    if ANTHROPIC_API_KEY:
+        try:
+            import anthropic
+            client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+            message = await client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=300,
+                system=SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = message.content[0].text if message.content else ""
+            return _parse_model_response(raw)
+        except Exception as exc:
+            logger.warning(f"Claude (Anthropic) error: {exc}")
+            return _fallback_response("claude")
+
+    if OPENROUTER_API_KEY:
+        try:
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(
+                api_key=OPENROUTER_API_KEY,
+                base_url=OPENROUTER_BASE_URL,
+            )
+            resp = await client.chat.completions.create(
+                model=OPENROUTER_CLAUDE_MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=300,
+            )
+            raw = resp.choices[0].message.content or ""
+            return _parse_model_response(raw)
+        except Exception as exc:
+            logger.warning(f"Claude (OpenRouter) error: {exc}")
+            return _fallback_response("claude")
+
+    return _fallback_response("claude")
 
 
 async def query_gemini(prompt: str) -> Dict[str, Any]:
