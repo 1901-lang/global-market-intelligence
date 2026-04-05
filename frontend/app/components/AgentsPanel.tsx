@@ -2,6 +2,21 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 
+function getUserRole(): string | null {
+  if (typeof window === 'undefined') return null
+  const token = localStorage.getItem('aip_token')
+  if (!token) return null
+  try { return JSON.parse(atob(token.split('.')[1])).role || null } catch { return null }
+}
+
+function formatRelative(ts: string): string {
+  const s = (Date.now() - new Date(ts).getTime()) / 1000
+  if (s < 60) return 'just now'
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+  return `${Math.floor(s / 86400)}d ago`
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface AgentStatus {
@@ -219,6 +234,12 @@ function AgentQueryPanel({
   const [result, setResult] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showModal, setShowModal] = useState(false)
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem('agent_' + endpoint)
+    if (saved) setResult(saved)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const run = useCallback(async () => {
     setLoading(true)
@@ -237,6 +258,8 @@ function AgentQueryPanel({
           data.reply ?? data.insight ?? data.analysis ?? data.content ?? data.guide ??
           (typeof data === 'string' ? data : JSON.stringify(data, null, 2))
         setResult(text)
+        sessionStorage.setItem('agent_' + endpoint, text)
+        if (endpoint === '/api/agents/market-intel/deep-dive') setShowModal(true)
       } else {
         setResult(`Error ${res.status}`)
       }
@@ -269,6 +292,20 @@ function AgentQueryPanel({
           {result}
         </div>
       )}
+      {showModal && endpoint === '/api/agents/market-intel/deep-dive' && result && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-start justify-center pt-12 px-4" onClick={() => setShowModal(false)}>
+          <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-6 max-w-3xl w-full max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-white">Asset Deep-Dive Analysis</h3>
+              <div className="flex gap-2">
+                <button onClick={() => { navigator.clipboard.writeText(result).catch(() => {}) }} className="px-2 py-1 text-xs border border-[#30363d] rounded text-gray-400 hover:text-white">📋 Copy</button>
+                <button onClick={() => setShowModal(false)} className="px-2 py-1 text-xs border border-[#30363d] rounded text-gray-400 hover:text-white">✕ Close</button>
+              </div>
+            </div>
+            <div className="overflow-y-auto flex-1 text-xs text-gray-300 whitespace-pre-wrap font-mono">{result}</div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -279,6 +316,7 @@ export default function AgentsPanel({ apiUrl }: { apiUrl: string }) {
   const [statuses, setStatuses] = useState<AgentStatus[]>([])
   const [activity, setActivity] = useState<ActivityEntry[]>([])
   const [activeTab, setActiveTab] = useState<'overview' | 'orchestrator' | 'marketing' | 'intel' | 'support' | 'analytics'>('overview')
+  const [userRole] = useState<string | null>(() => typeof window !== 'undefined' ? getUserRole() : null)
 
   const loadStatus = useCallback(async () => {
     try {
@@ -301,7 +339,7 @@ export default function AgentsPanel({ apiUrl }: { apiUrl: string }) {
     return () => clearInterval(interval)
   }, [loadStatus, loadActivity])
 
-  const tabs = [
+  const allTabs = [
     { id: 'overview',      label: '🗂 Overview' },
     { id: 'orchestrator',  label: '🎯 COO' },
     { id: 'marketing',     label: '📣 Marketing' },
@@ -309,6 +347,8 @@ export default function AgentsPanel({ apiUrl }: { apiUrl: string }) {
     { id: 'support',       label: '💬 Support' },
     { id: 'analytics',     label: '📊 Analytics' },
   ] as const
+
+  const tabs = allTabs.filter(t => t.id !== 'marketing' || userRole === 'admin')
 
   return (
     <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-4">
@@ -357,6 +397,7 @@ export default function AgentsPanel({ apiUrl }: { apiUrl: string }) {
                   <span className="text-gray-600">·</span>
                   <span>{a.action_type}</span>
                   {a.summary && <span className="text-gray-500 truncate flex-1">{a.summary}</span>}
+                  {a.timestamp && <span className="text-gray-600 ml-auto flex-shrink-0">{formatRelative(a.timestamp)}</span>}
                 </div>
               ))}
             </div>

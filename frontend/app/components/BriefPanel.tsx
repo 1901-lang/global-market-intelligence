@@ -1,6 +1,8 @@
 'use client'
 
+import { useState } from 'react'
 import SignalBadge from './SignalBadge'
+import ReactMarkdown from 'react-markdown'
 
 interface KeySignal {
   asset: string
@@ -20,21 +22,49 @@ interface Brief {
 interface BriefPanelProps {
   brief: Brief | null
   loading?: boolean
+  assets?: { symbol: string; price: number; change_24h?: number }[]
 }
 
-export default function BriefPanel({ brief, loading }: BriefPanelProps) {
+function formatRelative(ts: string): string {
+  const diff = (Date.now() - new Date(ts).getTime()) / 1000
+  if (diff < 60) return 'just now'
+  if (diff < 3600) return `${Math.floor(diff / 60)} min ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} hrs ago`
+  return `${Math.floor(diff / 86400)} days ago`
+}
+
+export default function BriefPanel({ brief, loading, assets }: BriefPanelProps) {
+  const [copied, setCopied] = useState(false)
+
   return (
     <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-4">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h2 className="font-bold text-white flex items-center gap-2">
           <span>📰</span> Daily Intelligence Brief
         </h2>
-        {brief?.date && (
-          <span className="text-xs text-gray-500 bg-[#21262d] px-2 py-1 rounded">
-            {brief.date}
-          </span>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {brief?.date && (
+            <span className="text-xs text-gray-500 bg-[#21262d] px-2 py-1 rounded">
+              {brief.date}
+            </span>
+          )}
+          {brief && (
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(brief.content).catch(() => {})
+                setCopied(true)
+                setTimeout(() => setCopied(false), 2000)
+              }}
+              className="px-2 py-1 text-xs rounded border border-[#30363d] text-gray-400 hover:text-white transition-colors"
+            >
+              {copied ? '✓ Copied' : '📋 Copy'}
+            </button>
+          )}
+        </div>
       </div>
+      {brief?.timestamp && (
+        <span className="text-xs text-gray-600 block mb-3">Generated {formatRelative(brief.timestamp)}</span>
+      )}
 
       {loading ? (
         <div className="text-center text-gray-500 text-sm py-8">
@@ -43,10 +73,20 @@ export default function BriefPanel({ brief, loading }: BriefPanelProps) {
         </div>
       ) : brief ? (
         <div>
-          <div className="prose prose-sm max-w-none">
-            <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
+          <div className="prose prose-sm max-w-none text-sm leading-relaxed">
+            <ReactMarkdown
+              components={{
+                h1: ({children}) => <h1 className="text-white font-bold text-base mt-3 mb-1">{children}</h1>,
+                h2: ({children}) => <h2 className="text-white font-semibold text-sm mt-2 mb-1">{children}</h2>,
+                h3: ({children}) => <h3 className="text-gray-200 font-medium text-sm mt-2 mb-0.5">{children}</h3>,
+                p: ({children}) => <p className="text-gray-300 mb-2">{children}</p>,
+                strong: ({children}) => <strong className="text-white font-semibold">{children}</strong>,
+                ul: ({children}) => <ul className="list-disc list-inside text-gray-300 space-y-0.5 mb-2">{children}</ul>,
+                li: ({children}) => <li className="text-gray-300">{children}</li>,
+              }}
+            >
               {brief.content}
-            </p>
+            </ReactMarkdown>
           </div>
 
           {brief.key_signals && brief.key_signals.length > 0 && (
@@ -55,13 +95,22 @@ export default function BriefPanel({ brief, loading }: BriefPanelProps) {
                 Key Signals
               </h3>
               <div className="flex flex-wrap gap-2">
-                {brief.key_signals.map((s, i) => (
-                  <div key={i} className="flex items-center gap-1.5 bg-[#21262d] rounded-lg px-2 py-1">
-                    <span className="text-xs font-semibold text-white">{s.asset}</span>
-                    <SignalBadge signal={s.signal} size="sm" />
-                    <span className="text-xs text-gray-500">{(s.confidence * 100).toFixed(0)}%</span>
-                  </div>
-                ))}
+                {brief.key_signals.map((s, i) => {
+                  const a = (assets || []).find(x => x.symbol === s.asset)
+                  return (
+                    <div key={i} className="flex items-center gap-1.5 bg-[#21262d] rounded-lg px-2 py-1">
+                      <span className="text-xs font-semibold text-white">{s.asset}</span>
+                      <SignalBadge signal={s.signal} size="sm" />
+                      <span className="text-xs text-gray-500">{(s.confidence * 100).toFixed(0)}%</span>
+                      {a ? (
+                        <span className="text-gray-600 ml-1">
+                          ${a.price >= 1000 ? a.price.toLocaleString('en-US', { maximumFractionDigits: 0 }) : a.price.toFixed(2)}
+                          {a.change_24h != null ? ` ${a.change_24h >= 0 ? '+' : ''}${a.change_24h.toFixed(1)}%` : ''}
+                        </span>
+                      ) : null}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}

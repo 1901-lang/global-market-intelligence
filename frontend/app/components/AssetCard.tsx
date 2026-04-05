@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import SignalBadge from './SignalBadge'
 
 interface Asset {
@@ -24,6 +25,8 @@ interface Consensus {
 interface AssetCardProps {
   asset: Asset
   consensus?: Consensus
+  priceHistory?: number[]
+  onClick?: () => void
 }
 
 function formatPrice(price: number, symbol: string): string {
@@ -37,6 +40,12 @@ function formatChange(change?: number): string {
   return `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`
 }
 
+function formatVolume(v: number): string {
+  if (v >= 1e9) return `$${(v / 1e9).toFixed(2)}B`
+  if (v >= 1e6) return `$${(v / 1e6).toFixed(2)}M`
+  return `$${(v / 1e3).toFixed(0)}k`
+}
+
 function ChangeIndicator({ value }: { value?: number }) {
   const isPositive = (value ?? 0) >= 0
   return (
@@ -46,7 +55,23 @@ function ChangeIndicator({ value }: { value?: number }) {
   )
 }
 
-export default function AssetCard({ asset, consensus }: AssetCardProps) {
+function Sparkline({ prices }: { prices: number[] }) {
+  if (prices.length < 2) return null
+  const min = Math.min(...prices)
+  const max = Math.max(...prices)
+  const range = max - min || 1
+  const w = 60, h = 28
+  const pts = prices.map((p, i) => `${(i / (prices.length - 1)) * w},${h - ((p - min) / range) * h}`).join(' ')
+  const color = prices[prices.length - 1] >= prices[0] ? '#10b981' : '#ef4444'
+  return (
+    <svg width={w} height={h} className="overflow-visible">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export default function AssetCard({ asset, consensus, priceHistory, onClick }: AssetCardProps) {
+  const [showTooltip, setShowTooltip] = useState(false)
   const signal = consensus?.final_signal || 'HOLD'
   const confidence = consensus?.confidence || 0
   const agreementLevel = consensus?.agreement_level || 'low'
@@ -62,7 +87,10 @@ export default function AssetCard({ asset, consensus }: AssetCardProps) {
     : (asset.symbol === 'GOLD' ? '🥇' : '🛢')
 
   return (
-    <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-5 hover:border-[#58a6ff]/40 transition-colors">
+    <div
+      className={`bg-[#161b22] border border-[#30363d] rounded-xl p-5 hover:border-[#58a6ff]/40 transition-colors ${onClick ? 'cursor-pointer' : ''}`}
+      onClick={onClick}
+    >
       <div className="flex items-start justify-between mb-3">
         <div>
           <div className="flex items-center gap-2">
@@ -73,7 +101,10 @@ export default function AssetCard({ asset, consensus }: AssetCardProps) {
             </div>
           </div>
         </div>
-        <SignalBadge signal={signal} size="md" />
+        <div className="flex flex-col items-end gap-1">
+          <SignalBadge signal={signal} size="md" />
+          {priceHistory && priceHistory.length >= 2 && <Sparkline prices={priceHistory} />}
+        </div>
       </div>
 
       <div className="mb-3">
@@ -84,10 +115,29 @@ export default function AssetCard({ asset, consensus }: AssetCardProps) {
           <span className="text-gray-500">1h: <ChangeIndicator value={asset.change_1h} /></span>
           <span className="text-gray-500">24h: <ChangeIndicator value={asset.change_24h} /></span>
         </div>
+        {asset.volume_24h != null && (
+          <div className="text-xs text-gray-500 mt-0.5">
+            Vol: <span className="text-gray-400">{formatVolume(asset.volume_24h)}</span>
+          </div>
+        )}
       </div>
 
       {consensus && (
-        <div className="border-t border-[#30363d] pt-3 mt-3">
+        <div
+          className="border-t border-[#30363d] pt-3 mt-3 relative"
+          onMouseEnter={() => setShowTooltip(true)}
+          onMouseLeave={() => setShowTooltip(false)}
+        >
+          {showTooltip && consensus?.models && Object.keys(consensus.models).length > 0 && (
+            <div className="absolute bottom-full left-0 mb-1 z-20 bg-[#0d1117] border border-[#30363d] rounded-lg p-2 text-xs shadow-xl min-w-[160px]">
+              {Object.entries(consensus.models).map(([name, m]) => (
+                <div key={name} className="flex justify-between gap-3 py-0.5">
+                  <span className="text-gray-400 capitalize">{name}</span>
+                  <span className="text-white">{m.signal} {(m.confidence * 100).toFixed(0)}%</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="flex items-center justify-between text-sm">
             <span className="text-gray-400">AI Confidence</span>
             <span className="font-semibold text-white">{(confidence * 100).toFixed(0)}%</span>

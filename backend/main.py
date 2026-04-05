@@ -600,6 +600,57 @@ async def get_performance():
     return await get_all_performance()
 
 
+@app.get("/api/briefs")
+async def get_brief_history(limit: int = 5):
+    """Return the N most recent generated briefs."""
+    try:
+        async with get_db() as db:
+            rows = await db.fetchall(
+                "SELECT id, content, key_signals, risks, date, timestamp FROM market_briefs ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "content": row["content"] or "",
+                "key_signals": json.loads(row["key_signals"]) if row.get("key_signals") else [],
+                "risks": json.loads(row["risks"]) if row.get("risks") else [],
+                "date": row.get("date"),
+                "timestamp": row.get("timestamp"),
+            })
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/signals/history")
+async def get_signal_history(asset: str = "BTC", limit: int = 20):
+    """Return recent signal history for a given asset from model_outputs."""
+    asset_upper = asset.upper()
+    try:
+        async with get_db() as db:
+            rows = await db.fetchall(
+                """SELECT model_name, asset, signal, confidence, timestamp
+                   FROM model_outputs
+                   WHERE asset = ?
+                   ORDER BY timestamp DESC LIMIT ?""",
+                (asset_upper, limit),
+            )
+        return [
+            {
+                "model": row["model_name"],
+                "asset": row["asset"],
+                "signal": row["signal"],
+                "confidence": row["confidence"],
+                "timestamp": row["timestamp"],
+            }
+            for row in rows
+        ]
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.get("/api/full", response_model=FullMarketData)
 async def get_full_data(_: User = Depends(require_auth)):
     return FullMarketData(
