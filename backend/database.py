@@ -191,6 +191,65 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     notifications_enabled INTEGER DEFAULT 1,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ── Coordinator / MCP Orchestration Tables ────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    goal TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    classification TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+    context_json TEXT,
+    result_json TEXT,
+    error_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS task_steps (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    step_order INTEGER NOT NULL DEFAULT 0,
+    description TEXT NOT NULL,
+    tool TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    input_json TEXT,
+    output_json TEXT,
+    error TEXT,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    requires_approval INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS task_artifacts (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    artifact_type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    url TEXT,
+    metadata_json TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS task_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    payload_json TEXT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS coordinator_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    context_json TEXT,
+    is_active INTEGER DEFAULT 1
+);
 """
 
 
