@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -989,6 +990,90 @@ async def remove_configured_asset(
     _cache.pop("commodity_prices", None)
 
     return {"status": "ok", "symbol": sym}
+
+
+# ── Admin: database export ────────────────────────────────────────────────────
+
+@app.get("/api/admin/db/export")
+async def export_database(_: User = Depends(require_role("admin"))):
+    """Stream a full SQL dump of the database (admin only).
+
+    For PostgreSQL (production) the dump is produced by ``pg_dump``.
+    For SQLite (development) ``aiosqlite``'s ``iterdump()`` is used.
+
+    The response is streamed as an attachment so the caller can pipe it
+    directly to a file (equivalent to the Hostinger SSH export guide's
+    ``mysqldump … > backup.sql`` pattern, adapted for PostgreSQL/SQLite).
+    """
+    from db import IS_POSTGRES, DATABASE_URL, DB_PATH
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"backup_{timestamp}.sql"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+    if IS_POSTGRES:
+        # ── PostgreSQL: delegate to pg_dump ───────────────────────────────────
+        # Parse connection details from DATABASE_URL so we can pass them as
+        # individual pg_dump flags (avoids embedding the password in argv).
+        from urllib.parse import urlparse
+
+        parsed = urlparse(DATABASE_URL)
+        pg_env = os.environ.copy()
+        if parsed.password:
+            pg_env["PGPASSWORD"] = parsed.password
+
+        cmd = ["pg_dump", "--no-password"]
+        if parsed.hostname:
+            cmd += ["-h", parsed.hostname]
+        if parsed.port:
+            cmd += ["-p", str(parsed.port)]
+        if parsed.username:
+            cmd += ["-U", parsed.username]
+        db_name = parsed.path.lstrip("/")
+        if db_name:
+            cmd.append(db_name)
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=pg_env,
+            )
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=500,
+                detail="pg_dump not found — install postgresql-client on the server",
+            )
+
+        async def _pg_stream() -> AsyncGenerator[bytes, None]:
+            assert proc.stdout is not None
+            try:
+                while True:
+                    chunk = await proc.stdout.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                await proc.wait()
+                if proc.returncode != 0:
+                    stderr = b""
+                    if proc.stderr:
+                        stderr = await proc.stderr.read()
+                    logger.error("pg_dump failed (rc=%d): %s", proc.returncode, stderr.decode())
+
+        return StreamingResponse(_pg_stream(), media_type="text/plain", headers=headers)
+
+    else:
+        # ── SQLite: use aiosqlite iterdump ────────────────────────────────────
+        import aiosqlite
+
+        async def _sqlite_stream() -> AsyncGenerator[bytes, None]:
+            async with aiosqlite.connect(DB_PATH) as conn:
+                async for line in conn.iterdump():
+                    yield (line + "\n").encode()
+
+        return StreamingResponse(_sqlite_stream(), media_type="text/plain", headers=headers)
 
 
 # ── User preferences / portfolio ──────────────────────────────────────────────
