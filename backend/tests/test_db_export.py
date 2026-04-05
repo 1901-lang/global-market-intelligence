@@ -100,10 +100,19 @@ async def test_export_contains_known_table(admin_token):
 
 @pytest.mark.asyncio
 async def test_export_requires_auth():
-    """Endpoint must reject unauthenticated requests with 401."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        response = await client.get("/api/admin/db/export")
+    """Endpoint must reject unauthenticated requests with 401 when auth is enabled."""
+    import auth as auth_module
+
+    # Temporarily enable auth enforcement regardless of env-var ordering across
+    # test modules (auth.REQUIRE_AUTH is read once at import time).
+    original = auth_module.REQUIRE_AUTH
+    auth_module.REQUIRE_AUTH = True
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.get("/api/admin/db/export")
+    finally:
+        auth_module.REQUIRE_AUTH = original
 
     assert response.status_code == 401

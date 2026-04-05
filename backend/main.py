@@ -75,6 +75,11 @@ class UserPreferencesModel(PydanticBaseModel):
     notify_email: bool = True
     email_address: Optional[str] = None
     notifications_enabled: bool = True
+
+
+class UserUpdateModel(PydanticBaseModel):
+    role: Optional[str] = None          # admin | analyst | readonly
+    is_active: Optional[bool] = None
 from security import sanitize_input
 from services.data_service import fetch_all_assets, fetch_macro_context, load_configured_assets
 from services.signal_engine import generate_all_signals
@@ -486,7 +491,7 @@ async def mark_read(request: Request, alert_id: int, _: User = Depends(require_a
 
 
 @app.get("/api/brief", response_model=Optional[Brief])
-async def get_brief():
+async def get_brief(_: User = Depends(require_auth)):
     return await get_latest_brief()
 
 
@@ -596,7 +601,7 @@ async def get_performance():
 
 
 @app.get("/api/full", response_model=FullMarketData)
-async def get_full_data():
+async def get_full_data(_: User = Depends(require_auth)):
     return FullMarketData(
         assets=_state["assets"],
         context=_state["context"],
@@ -1075,6 +1080,70 @@ async def export_database(_: User = Depends(require_role("admin"))):
                     yield (line + "\n").encode()
 
         return StreamingResponse(_sqlite_stream(), media_type="text/plain", headers=headers)
+
+
+# ── Admin: user management ────────────────────────────────────────────────────
+
+@app.get("/api/admin/users")
+async def list_users(_: User = Depends(require_role("admin"))):
+    """Return all user accounts (admin only). Passwords are never included."""
+    try:
+        async with get_db() as db:
+            rows = await db.fetchall(
+                "SELECT id, username, email, role, is_active, created_at FROM users ORDER BY id"
+            )
+        return list(rows)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.patch("/api/admin/users/{username}")
+@limiter.limit("30/minute")
+async def update_user(
+    request: Request,
+    username: str,
+    body: UserUpdateModel,
+    current_admin: User = Depends(require_role("admin")),
+):
+    """Update a user's role or active status (admin only).
+
+    Admins cannot deactivate their own account to prevent lockout.
+    """
+    if body.role is None and body.is_active is None:
+        raise HTTPException(status_code=400, detail="Provide at least one field to update")
+    if body.role is not None and body.role not in ("admin", "analyst", "readonly"):
+        raise HTTPException(status_code=400, detail="role must be admin, analyst, or readonly")
+    # Prevent self-lockout
+    if current_admin.username == username and body.is_active is False:
+        raise HTTPException(status_code=400, detail="Admins cannot deactivate their own account")
+    try:
+        async with get_db() as db:
+            existing = await db.fetchone(
+                "SELECT id FROM users WHERE username = ?", (username,)
+            )
+            if not existing:
+                raise HTTPException(status_code=404, detail="User not found")
+            if body.role is not None and body.is_active is not None:
+                await db.execute(
+                    "UPDATE users SET role = ?, is_active = ? WHERE username = ?",
+                    (body.role, 1 if body.is_active else 0, username),
+                )
+            elif body.role is not None:
+                await db.execute(
+                    "UPDATE users SET role = ? WHERE username = ?",
+                    (body.role, username),
+                )
+            else:
+                await db.execute(
+                    "UPDATE users SET is_active = ? WHERE username = ?",
+                    (1 if body.is_active else 0, username),
+                )
+            await db.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"status": "ok", "username": username}
 
 
 # ── User preferences / portfolio ──────────────────────────────────────────────

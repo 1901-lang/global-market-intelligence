@@ -209,14 +209,21 @@ async def get_optional_user(
     return _user_from_row(row) if row else None
 
 
-async def require_auth(token: str = Depends(oauth2_scheme)) -> User:
+async def require_auth(token: Optional[str] = Depends(oauth2_scheme_optional)) -> User:
     """Dependency that enforces auth only when REQUIRE_AUTH=true.
 
-    When REQUIRE_AUTH is false (default for dev) any caller is treated as an
-    anonymous analyst so the existing frontend keeps working without changes.
+    Uses the optional OAuth2 scheme so that requests without a Bearer token
+    are not rejected by FastAPI before the REQUIRE_AUTH check runs.  When
+    REQUIRE_AUTH is false any caller is treated as an anonymous analyst.
     """
     if not REQUIRE_AUTH:
         return User(username="anonymous", role="analyst")
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return await get_current_user(token)
 
 

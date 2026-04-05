@@ -1,9 +1,12 @@
+import logging
 import os
 import aiosqlite
 from datetime import datetime
 from typing import Optional
 
 from db import DB_PATH, IS_POSTGRES, get_db
+
+logger = logging.getLogger(__name__)
 
 # DB_PATH re-exported so existing code that imports it from database still works
 __all__ = ["DB_PATH", "init_db"]
@@ -246,6 +249,31 @@ async def seed_default_assets():
         await db.commit()
 
 
+async def seed_admin_user():
+    """Create an initial admin user from ADMIN_USERNAME / ADMIN_PASSWORD env vars.
+
+    Only runs when both vars are set and no user with that username already exists.
+    This gives fresh deployments a working admin account without manual DB access.
+    The password must be at least 8 characters long.
+    """
+    username = os.environ.get("ADMIN_USERNAME", "").strip()
+    password = os.environ.get("ADMIN_PASSWORD", "").strip()
+    if not username or not password:
+        return
+    if len(password) < 8:
+        logger.warning(
+            "ADMIN_PASSWORD is too short (minimum 8 characters) — skipping admin seed"
+        )
+        return
+    from auth import create_user, get_user_by_username, UserCreate
+
+    existing = await get_user_by_username(username)
+    if existing:
+        return
+    await create_user(UserCreate(username=username, password=password, role="admin"))
+    logger.info("Seeded admin user: %s", username)
+
+
 async def init_db():
     if IS_POSTGRES:
         pg_ddl = _make_pg_ddl(CREATE_TABLES_SQL)
@@ -264,3 +292,4 @@ async def init_db():
 
     await _run_migrations()
     await seed_default_assets()
+    await seed_admin_user()
