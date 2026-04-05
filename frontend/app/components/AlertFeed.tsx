@@ -66,7 +66,9 @@ export default function AlertFeed({ apiUrl }: AlertFeedProps) {
           data.forEach(a => {
             if (a.severity === 'critical' && !seenIds.current.has(a.id)) {
               if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-                new Notification(`🚨 Critical: ${a.asset}`, { body: a.message })
+                // Truncate message to avoid overly long notification bodies; strip any HTML-like content
+                const safeBody = a.message.replace(/[<>]/g, '').slice(0, 200)
+                new Notification(`🚨 Critical: ${a.asset}`, { body: safeBody })
               }
             }
           })

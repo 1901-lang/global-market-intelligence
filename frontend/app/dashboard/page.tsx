@@ -619,9 +619,10 @@ export default function Home() {
 
   useEffect(() => {
     if (!data?.assets) return
+    const assets = data.assets
     const fetchHistories = async () => {
       const results = await Promise.all(
-        data.assets.map(async asset => {
+        assets.map(async asset => {
           try {
             const res = await fetch(`${API_URL}/api/history/${asset.symbol}?limit=7`)
             if (res.ok) {
@@ -635,7 +636,8 @@ export default function Home() {
       setPriceHistories(Object.fromEntries(results.map(r => [r.symbol, r.prices])))
     }
     void fetchHistories()
-  }, [data?.assets]) // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data])
 
   const consensus = data?.consensus || []
 
