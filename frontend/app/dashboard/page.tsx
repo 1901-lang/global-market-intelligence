@@ -10,6 +10,7 @@ import SignalBadge from '../components/SignalBadge'
 import AgentsPanel from '../components/AgentsPanel'
 import WatchlistPanel from '../components/WatchlistPanel'
 import MacroHeatmap from '../components/MacroHeatmap'
+import CoordinatorChat from '../components/CoordinatorChat'
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
@@ -747,9 +748,52 @@ export default function Home() {
 
             {/* AI Agent Team */}
             <AgentsPanel apiUrl={API_URL} />
+
+            {/* Coordinator Chat */}
+            <div className="fixed bottom-4 right-4 z-50">
+              <CoordinatorChatWidget />
+            </div>
           </>
         )}
       </main>
+    </div>
+  )
+}
+
+// Floating chat widget with expand/collapse
+function CoordinatorChatWidget() {
+  const [isExpanded, setIsExpanded] = useState(false)
+
+  if (!isExpanded) {
+    return (
+      <button
+        onClick={() => setIsExpanded(true)}
+        className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-500 shadow-lg flex items-center justify-center transition-all hover:scale-105"
+        title="Open Coordinator Chat"
+      >
+        <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+            d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" 
+          />
+        </svg>
+      </button>
+    )
+  }
+
+  return (
+    <div className="w-[400px] h-[500px] shadow-2xl rounded-lg overflow-hidden">
+      <div className="bg-gray-800 px-3 py-2 flex items-center justify-between border-b border-gray-700">
+        <span className="text-sm font-medium text-white">AI Coordinator</span>
+        <button
+          onClick={() => setIsExpanded(false)}
+          className="text-gray-400 hover:text-white transition-colors"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+      </div>
+      <CoordinatorChat className="h-[calc(100%-40px)]" />
     </div>
   )
 }
